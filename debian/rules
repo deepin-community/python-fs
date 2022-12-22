@@ -1,0 +1,11 @@
+#!/usr/bin/make -f
+
+export LC_ALL=C.UTF-8
+
+%:
+	dh $@ --with python3,sphinxdoc --buildsystem=pybuild
+
+override_dh_auto_test:
+	# skip tests that is not runnable with python3-pyftpdlib due to missing
+	# test moudles
+	dh_auto_test -- --test-pytest --test-args="--ignore tests/test_ftpfs.py"

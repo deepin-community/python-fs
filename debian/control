@@ -1,0 +1,34 @@
+Source: python-fs
+Section: python
+Priority: optional
+Maintainer: Debian Python Team <team+python@tracker.debian.org>
+Uploaders: Jan Dittberner <jandd@debian.org>,
+           Yao Wei (魏銘廷) <mwei@debian.org>,
+Build-Depends: debhelper-compat (= 13),
+               dh-python,
+               python3-all:any,
+               python3-setuptools,
+               python3-tz,
+               python3-six (>= 1.10.0),
+               python3-appdirs <!nocheck>,
+               python3-coverage <!nocheck>,
+               python3-pytest <!nocheck>,
+               python3-mock <!nocheck>,
+               python3-sphinx,
+Standards-Version: 4.5.0
+Homepage: https://pypi.python.org/pypi/fs/
+Vcs-Git: https://salsa.debian.org/python-team/packages/python-fs.git
+Vcs-Browser: https://salsa.debian.org/python-team/packages/python-fs
+Testsuite: autopkgtest-pkg-python
+
+Package: python3-fs
+Architecture: all
+Depends: python3-tz,
+         python3-six (>= 1.10.0),
+         ${misc:Depends},
+         ${python3:Depends},
+         ${sphinxdoc:Depends},
+Description: Python filesystem abstraction
+ Pyfilesystem is a Python module that provides a common interface to many types
+ of filesystem, and provides some powerful features such as exposing
+ filesystems over an internet connection, or to the native filesystem.
