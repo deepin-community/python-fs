@@ -1,19 +1,19 @@
 """Manage a directory in a *parent* filesystem.
 """
 
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import print_function, unicode_literals
 
 import typing
 
 import six
 
-from .wrapfs import WrapFS
 from .path import abspath, join, normpath, relpath
+from .wrapfs import WrapFS
 
 if typing.TYPE_CHECKING:
-    from .base import FS  # noqa: F401
     from typing import Text, Tuple
+
+    from .base import FS  # noqa: F401
 
 
 _F = typing.TypeVar("_F", bound="FS", covariant=True)
@@ -21,7 +21,7 @@ _F = typing.TypeVar("_F", bound="FS", covariant=True)
 
 @six.python_2_unicode_compatible
 class SubFS(WrapFS[_F], typing.Generic[_F]):
-    """A sub-directory on another filesystem.
+    """A sub-directory on a parent filesystem.
 
     A SubFS is a filesystem object that maps to a sub-directory of
     another filesystem. This is the object that is returned by
@@ -29,7 +29,7 @@ class SubFS(WrapFS[_F], typing.Generic[_F]):
 
     """
 
-    def __init__(self, parent_fs, path):
+    def __init__(self, parent_fs, path):  # noqa: D107
         # type: (_F, Text) -> None
         super(SubFS, self).__init__(parent_fs)
         self._sub_dir = abspath(normpath(path))
@@ -55,8 +55,7 @@ class SubFS(WrapFS[_F], typing.Generic[_F]):
 
 
 class ClosingSubFS(SubFS[_F], typing.Generic[_F]):
-    """A version of `SubFS` which closes its parent when closed.
-    """
+    """A version of `SubFS` which closes its parent when closed."""
 
     def close(self):
         # type: () -> None

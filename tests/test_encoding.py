@@ -3,22 +3,16 @@ from __future__ import unicode_literals
 import os
 import platform
 import shutil
+import six
 import tempfile
 import unittest
-
-import pytest
-
-import six
 
 import fs
 from fs.osfs import OSFS
 
-
 if platform.system() != "Windows":
 
-    @pytest.mark.skipif(
-        platform.system() == "Darwin", reason="Bad unicode not possible on OSX"
-    )
+    @unittest.skipIf(platform.system() == "Darwin", "Bad unicode not possible on OSX")
     class TestEncoding(unittest.TestCase):
 
         TEST_FILENAME = b"foo\xb1bar"

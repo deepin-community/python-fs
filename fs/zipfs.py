@@ -1,28 +1,28 @@
 """Manage the filesystem in a Zip archive.
 """
 
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import print_function, unicode_literals
 
+import sys
 import typing
+
+import six
 import zipfile
 from datetime import datetime
 
-import six
-
 from . import errors
+from ._url_tools import url_quote
 from .base import FS
 from .compress import write_zip
 from .enums import ResourceType, Seek
 from .info import Info
 from .iotools import RawWrapper
-from .permissions import Permissions
 from .memoryfs import MemoryFS
 from .opener import open_fs
 from .path import dirname, forcedir, normpath, relpath
+from .permissions import Permissions
 from .time import datetime_to_epoch
 from .wrapfs import WrapFS
-from ._url_tools import url_quote
 
 if typing.TYPE_CHECKING:
     from typing import (
@@ -37,6 +37,7 @@ if typing.TYPE_CHECKING:
         Tuple,
         Union,
     )
+
     from .info import RawInfo
     from .subfs import SubFS
 
@@ -44,91 +45,146 @@ if typing.TYPE_CHECKING:
 
 
 class _ZipExtFile(RawWrapper):
-    def __init__(self, fs, name):
+    def __init__(self, fs, name):  # noqa: D107
         # type: (ReadZipFS, Text) -> None
         self._zip = _zip = fs._zip
         self._end = _zip.getinfo(name).file_size
         self._pos = 0
         super(_ZipExtFile, self).__init__(_zip.open(name), "r", name)
 
-    def read(self, size=-1):
-        # type: (int) -> bytes
-        buf = self._f.read(-1 if size is None else size)
-        self._pos += len(buf)
-        return buf
+    # NOTE(@althonos): Starting from Python 3.7, files inside a Zip archive are
+    #                  seekable provided they were opened from a seekable file
+    #                  handle. Before that, we can emulate a seek using the
+    #                  read method, although it adds a ton of overhead and is
+    #                  way less efficient than extracting once to a BytesIO.
+    if sys.version_info < (3, 7):
 
-    def read1(self, size=-1):
-        # type: (int) -> bytes
-        buf = self._f.read1(-1 if size is None else size)  # type: ignore
-        self._pos += len(buf)
-        return buf
+        def read(self, size=-1):
+            # type: (int) -> bytes
+            buf = self._f.read(-1 if size is None else size)
+            self._pos += len(buf)
+            return buf
 
-    def seek(self, offset, whence=Seek.set):
-        # type: (int, SupportsInt) -> int
-        """Change stream position.
+        def read1(self, size=-1):
+            # type: (int) -> bytes
+            buf = self._f.read1(-1 if size is None else size)  # type: ignore
+            self._pos += len(buf)
+            return buf
 
-        Change the stream position to the given byte offset. The
-        offset is interpreted relative to the position indicated by
-        ``whence``.
+        def tell(self):
+            # type: () -> int
+            return self._pos
 
-        Arguments:
-            offset (int): the offset to the new position, in bytes.
-            whence (int): the position reference. Possible values are:
-                * `Seek.set`: start of stream (the default).
-                * `Seek.current`: current position; offset may be negative.
-                * `Seek.end`: end of stream; offset must be negative.
+        def seekable(self):
+            return True
 
-        Returns:
-            int: the new absolute position.
+        def seek(self, offset, whence=Seek.set):
+            # type: (int, SupportsInt) -> int
+            """Change stream position.
 
-        Raises:
-            ValueError: when ``whence`` is not known, or ``offset``
-                is invalid.
+            Change the stream position to the given byte offset. The
+            offset is interpreted relative to the position indicated by
+            ``whence``.
 
-        Note:
-            Zip compression does not support seeking, so the seeking
-            is emulated. Seeking somewhere else than the current position
-            will need to either:
-                * reopen the file and restart decompression
-                * read and discard data to advance in the file
+            Arguments:
+                offset (int): the offset to the new position, in bytes.
+                whence (int): the position reference. Possible values are:
+                    * `Seek.set`: start of stream (the default).
+                    * `Seek.current`: current position; offset may be negative.
+                    * `Seek.end`: end of stream; offset must be negative.
 
-        """
-        _whence = int(whence)
-        if _whence == Seek.current:
-            offset += self._pos
-        if _whence == Seek.current or _whence == Seek.set:
-            if offset < 0:
-                raise ValueError("Negative seek position {}".format(offset))
-        elif _whence == Seek.end:
-            if offset > 0:
-                raise ValueError("Positive seek position {}".format(offset))
-            offset += self._end
-        else:
-            raise ValueError(
-                "Invalid whence ({}, should be {}, {} or {})".format(
-                    _whence, Seek.set, Seek.current, Seek.end
+            Returns:
+                int: the new absolute position.
+
+            Raises:
+                ValueError: when ``whence`` is not known, or ``offset``
+                    is invalid.
+
+            Note:
+                Zip compression does not support seeking, so the seeking
+                is emulated. Seeking somewhere else than the current position
+                will need to either:
+                    * reopen the file and restart decompression
+                    * read and discard data to advance in the file
+
+            """
+            _whence = int(whence)
+            if _whence == Seek.current:
+                offset += self._pos
+            if _whence == Seek.current or _whence == Seek.set:
+                if offset < 0:
+                    raise ValueError("Negative seek position {}".format(offset))
+            elif _whence == Seek.end:
+                if offset > 0:
+                    raise ValueError("Positive seek position {}".format(offset))
+                offset += self._end
+            else:
+                raise ValueError(
+                    "Invalid whence ({}, should be {}, {} or {})".format(
+                        _whence, Seek.set, Seek.current, Seek.end
+                    )
                 )
-            )
 
-        if offset < self._pos:
-            self._f = self._zip.open(self.name)  # type: ignore
-            self._pos = 0
-        self.read(offset - self._pos)
-        return self._pos
+            if offset < self._pos:
+                self._f = self._zip.open(self.name)  # type: ignore
+                self._pos = 0
+            self.read(offset - self._pos)
+            return self._pos
 
-    def tell(self):
-        # type: () -> int
-        return self._pos
+    else:
+
+        def seek(self, offset, whence=Seek.set):
+            # type: (int, SupportsInt) -> int
+            """Change stream position.
+
+            Change the stream position to the given byte offset. The
+            offset is interpreted relative to the position indicated by
+            ``whence``.
+
+            Arguments:
+                offset (int): the offset to the new position, in bytes.
+                whence (int): the position reference. Possible values are:
+                    * `Seek.set`: start of stream (the default).
+                    * `Seek.current`: current position; offset may be negative.
+                    * `Seek.end`: end of stream; offset must be negative.
+
+            Returns:
+                int: the new absolute position.
+
+            Raises:
+                ValueError: when ``whence`` is not known, or ``offset``
+                    is invalid.
+
+            """
+            _whence = int(whence)
+            _pos = self.tell()
+            if _whence == Seek.set:
+                if offset < 0:
+                    raise ValueError("Negative seek position {}".format(offset))
+            elif _whence == Seek.current:
+                if _pos + offset < 0:
+                    raise ValueError("Negative seek position {}".format(offset))
+            elif _whence == Seek.end:
+                if offset > 0:
+                    raise ValueError("Positive seek position {}".format(offset))
+            else:
+                raise ValueError(
+                    "Invalid whence ({}, should be {}, {} or {})".format(
+                        _whence, Seek.set, Seek.current, Seek.end
+                    )
+                )
+
+            return self._f.seek(offset, _whence)
 
 
 class ZipFS(WrapFS):
     """Read and write zip files.
 
-    There are two ways to open a ZipFS for the use cases of reading
+    There are two ways to open a `ZipFS` for the use cases of reading
     a zip file, and creating a new one.
 
-    If you open the ZipFS with  ``write`` set to `False` (the default)
-    then the filesystem will be a read only filesystem which maps to
+    If you open the `ZipFS` with  ``write`` set to `False` (the default)
+    then the filesystem will be a read-only filesystem which maps to
     the files and directories within the zip file. Files are
     decompressed on the fly when you open them.
 
@@ -137,12 +193,12 @@ class ZipFS(WrapFS):
         with ZipFS('foo.zip') as zip_fs:
             readme = zip_fs.readtext('readme.txt')
 
-    If you open the ZipFS with ``write`` set to `True`, then the ZipFS
-    will be a empty temporary filesystem. Any files / directories you
-    create in the ZipFS will be written in to a zip file when the ZipFS
+    If you open the `ZipFS` with ``write`` set to `True`, then the `ZipFS`
+    will be an empty temporary filesystem. Any files / directories you
+    create in the `ZipFS` will be written in to a zip file when the `ZipFS`
     is closed.
 
-    Here's how you might write a new zip file containing a readme.txt
+    Here's how you might write a new zip file containing a ``readme.txt``
     file::
 
         with ZipFS('foo.zip', write=True) as new_zip:
@@ -158,8 +214,9 @@ class ZipFS(WrapFS):
             (default) to read an existing zip file.
         compression (int): Compression to use (one of the constants
             defined in the `zipfile` module in the stdlib).
-        temp_fs (str): An FS URL for the temporary filesystem used to
-            store data prior to zipping.
+        temp_fs (str or FS): An FS URL or an FS instance to use to
+            store data prior to zipping. Defaults to creating a new
+            `~fs.tempfs.TempFS`.
 
     """
 
@@ -170,7 +227,7 @@ class ZipFS(WrapFS):
         write=False,  # type: bool
         compression=zipfile.ZIP_DEFLATED,  # type: int
         encoding="utf-8",  # type: Text
-        temp_fs="temp://__ziptemp__",  # type: Text
+        temp_fs="temp://__ziptemp__",  # type: Union[Text, FS]
     ):
         # type: (...) -> FS
         # This magic returns a different class instance based on the
@@ -191,23 +248,22 @@ class ZipFS(WrapFS):
             compression=zipfile.ZIP_DEFLATED,  # type: int
             encoding="utf-8",  # type: Text
             temp_fs="temp://__ziptemp__",  # type: Text
-        ):
+        ):  # noqa: D107
             # type: (...) -> None
             pass
 
 
 @six.python_2_unicode_compatible
 class WriteZipFS(WrapFS):
-    """A writable zip file.
-    """
+    """A writable zip file."""
 
     def __init__(
         self,
         file,  # type: Union[Text, BinaryIO]
         compression=zipfile.ZIP_DEFLATED,  # type: int
         encoding="utf-8",  # type: Text
-        temp_fs="temp://__ziptemp__",  # type: Text
-    ):
+        temp_fs="temp://__ziptemp__",  # type: Union[Text, FS]
+    ):  # noqa: D107
         # type: (...) -> None
         self._file = file
         self.compression = compression
@@ -276,11 +332,10 @@ class WriteZipFS(WrapFS):
 
 @six.python_2_unicode_compatible
 class ReadZipFS(FS):
-    """A readable zip file.
-    """
+    """A readable zip file."""
 
     _meta = {
-        "case_insensitive": True,
+        "case_insensitive": False,
         "network": False,
         "read_only": True,
         "supports_rename": False,
@@ -290,7 +345,7 @@ class ReadZipFS(FS):
     }
 
     @errors.CreateFailed.catch_all
-    def __init__(self, file, encoding="utf-8"):
+    def __init__(self, file, encoding="utf-8"):  # noqa: D107
         # type: (Union[BinaryIO, Text], Text) -> None
         super(ReadZipFS, self).__init__()
         self._file = file
@@ -308,8 +363,7 @@ class ReadZipFS(FS):
 
     def _path_to_zip_name(self, path):
         # type: (Text) -> str
-        """Convert a path to a zip file name.
-        """
+        """Convert a path to a zip file name."""
         path = relpath(normpath(path))
         if self._directory.isdir(path):
             path = forcedir(path)
@@ -320,8 +374,7 @@ class ReadZipFS(FS):
     @property
     def _directory(self):
         # type: () -> MemoryFS
-        """`MemoryFS`: a filesystem with the same folder hierarchy as the zip.
-        """
+        """`MemoryFS`: a filesystem with the same folder hierarchy as the zip."""
         self.check()
         with self._lock:
             if self._directory_fs is None:

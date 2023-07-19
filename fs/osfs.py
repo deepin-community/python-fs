@@ -4,9 +4,10 @@ In essence, an `OSFS` is a thin layer over the `io` and `os` modules
 of the Python standard library.
 """
 
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, print_function, unicode_literals
+
+import sys
+import typing
 
 import errno
 import io
@@ -15,12 +16,9 @@ import logging
 import os
 import platform
 import shutil
-import stat
-import sys
-import tempfile
-import typing
-
 import six
+import stat
+import tempfile
 
 try:
     from os import scandir
@@ -39,31 +37,33 @@ except ImportError:
         sendfile = None  # type: ignore  # pragma: no cover
 
 from . import errors
+from ._fscompat import fsdecode, fsencode, fspath
+from ._url_tools import url_quote
 from .base import FS
+from .copy import copy_modified_time
 from .enums import ResourceType
-from ._fscompat import fsencode, fsdecode, fspath
+from .error_tools import convert_os_errors
+from .errors import FileExpected, NoURL
 from .info import Info
+from .mode import Mode, validate_open_mode
 from .path import basename, dirname
 from .permissions import Permissions
-from .error_tools import convert_os_errors
-from .mode import Mode, validate_open_mode
-from .errors import FileExpected, NoURL
-from ._url_tools import url_quote
 
 if typing.TYPE_CHECKING:
     from typing import (
+        IO,
         Any,
         BinaryIO,
         Collection,
         Dict,
         Iterator,
-        IO,
         List,
         Optional,
         SupportsInt,
         Text,
         Tuple,
     )
+
     from .base import _OpendirFactory
     from .info import RawInfo
     from .subfs import SubFS
@@ -81,22 +81,6 @@ _WINDOWS_PLATFORM = platform.system() == "Windows"
 class OSFS(FS):
     """Create an OSFS.
 
-    Arguments:
-        root_path (str or ~os.PathLike): An OS path or path-like object to
-            the location on your HD you wish to manage.
-        create (bool): Set to `True` to create the root directory if it
-            does not already exist, otherwise the directory should exist
-            prior to creating the ``OSFS`` instance (defaults to `False`).
-        create_mode (int): The permissions that will be used to create
-            the directory if ``create`` is `True` and the path doesn't
-            exist, defaults to ``0o777``.
-        expand_vars(bool): If `True` (the default) environment variables of
-            the form $name or ${name} will be expanded.
-
-    Raises:
-        `fs.errors.CreateFailed`: If ``root_path`` does not
-            exist, or could not be created.
-
     Examples:
         >>> current_directory_fs = OSFS('.')
         >>> home_fs = OSFS('~/')
@@ -113,6 +97,23 @@ class OSFS(FS):
     ):
         # type: (...) -> None
         """Create an OSFS instance.
+
+        Arguments:
+            root_path (str or ~os.PathLike): An OS path or path-like object
+                to the location on your HD you wish to manage.
+            create (bool): Set to `True` to create the root directory if it
+                does not already exist, otherwise the directory should exist
+                prior to creating the ``OSFS`` instance (defaults to `False`).
+            create_mode (int): The permissions that will be used to create
+                the directory if ``create`` is `True` and the path doesn't
+                exist, defaults to ``0o777``.
+            expand_vars(bool): If `True` (the default) environment variables
+                of the form ``~``, ``$name`` or ``${name}`` will be expanded.
+
+        Raises:
+            `fs.errors.CreateFailed`: If ``root_path`` does not
+                exist, or could not be created.
+
         """
         super(OSFS, self).__init__()
         if isinstance(root_path, bytes):
@@ -188,8 +189,7 @@ class OSFS(FS):
 
     def _to_sys_path(self, path):
         # type: (Text) -> bytes
-        """Convert a FS path to a path on the OS.
-        """
+        """Convert a FS path to a path on the OS."""
         sys_path = fsencode(
             os.path.join(self._root_path, path.lstrip("/").replace("/", os.sep))
         )
@@ -198,8 +198,7 @@ class OSFS(FS):
     @classmethod
     def _make_details_from_stat(cls, stat_result):
         # type: (os.stat_result) -> Dict[Text, object]
-        """Make a *details* info dict from an `os.stat_result` object.
-        """
+        """Make a *details* info dict from an `os.stat_result` object."""
         details = {
             "_write": ["accessed", "modified"],
             "accessed": stat_result.st_atime,
@@ -218,8 +217,7 @@ class OSFS(FS):
     @classmethod
     def _make_access_from_stat(cls, stat_result):
         # type: (os.stat_result) -> Dict[Text, object]
-        """Make an *access* info dict from an `os.stat_result` object.
-        """
+        """Make an *access* info dict from an `os.stat_result` object."""
         access = {}  # type: Dict[Text, object]
         access["permissions"] = Permissions(mode=stat_result.st_mode).dump()
         access["gid"] = gid = stat_result.st_gid
@@ -252,8 +250,7 @@ class OSFS(FS):
     @classmethod
     def _get_type_from_stat(cls, _stat):
         # type: (os.stat_result) -> ResourceType
-        """Get the resource type from an `os.stat_result` object.
-        """
+        """Get the resource type from an `os.stat_result` object."""
         st_mode = _stat.st_mode
         st_type = stat.S_IFMT(st_mode)
         return cls.STAT_TO_RESOURCE_TYPE.get(st_type, ResourceType.unknown)
@@ -434,8 +431,8 @@ class OSFS(FS):
         if hasattr(errno, "ENOTSUP"):
             _sendfile_error_codes.add(errno.ENOTSUP)
 
-        def copy(self, src_path, dst_path, overwrite=False):
-            # type: (Text, Text, bool) -> None
+        def copy(self, src_path, dst_path, overwrite=False, preserve_time=False):
+            # type: (Text, Text, bool, bool) -> None
             with self._lock:
                 # validate and canonicalise paths
                 _src_path, _dst_path = self._check_copy(src_path, dst_path, overwrite)
@@ -455,6 +452,8 @@ class OSFS(FS):
                             while sent > 0:
                                 sent = sendfile(fd_dst, fd_src, offset, maxsize)
                                 offset += sent
+                    if preserve_time:
+                        copy_modified_time(self, src_path, self, dst_path)
                 except OSError as e:
                     # the error is not a simple "sendfile not supported" error
                     if e.errno not in self._sendfile_error_codes:
@@ -464,8 +463,8 @@ class OSFS(FS):
 
     else:
 
-        def copy(self, src_path, dst_path, overwrite=False):
-            # type: (Text, Text, bool) -> None
+        def copy(self, src_path, dst_path, overwrite=False, preserve_time=False):
+            # type: (Text, Text, bool, bool) -> None
             with self._lock:
                 _src_path, _dst_path = self._check_copy(src_path, dst_path, overwrite)
                 shutil.copy2(self.getsyspath(_src_path), self.getsyspath(_dst_path))
@@ -478,6 +477,7 @@ class OSFS(FS):
             # type: (Text, Optional[Collection[Text]]) -> Iterator[Info]
             self.check()
             namespaces = namespaces or ()
+            requires_stat = not {"details", "stat", "access"}.isdisjoint(namespaces)
             _path = self.validatepath(path)
             if _WINDOWS_PLATFORM:
                 sys_path = os.path.join(
@@ -486,39 +486,47 @@ class OSFS(FS):
             else:
                 sys_path = self._to_sys_path(_path)  # type: ignore
             with convert_os_errors("scandir", path, directory=True):
-                for dir_entry in scandir(sys_path):
-                    info = {
-                        "basic": {
-                            "name": fsdecode(dir_entry.name),
-                            "is_dir": dir_entry.is_dir(),
+                scandir_iter = scandir(sys_path)
+                try:
+                    for dir_entry in scandir_iter:
+                        info = {
+                            "basic": {
+                                "name": fsdecode(dir_entry.name),
+                                "is_dir": dir_entry.is_dir(),
+                            }
                         }
-                    }
-                    if "details" in namespaces:
-                        stat_result = dir_entry.stat()
-                        info["details"] = self._make_details_from_stat(stat_result)
-                    if "stat" in namespaces:
-                        stat_result = dir_entry.stat()
-                        info["stat"] = {
-                            k: getattr(stat_result, k)
-                            for k in dir(stat_result)
-                            if k.startswith("st_")
-                        }
-                    if "lstat" in namespaces:
-                        lstat_result = dir_entry.stat(follow_symlinks=False)
-                        info["lstat"] = {
-                            k: getattr(lstat_result, k)
-                            for k in dir(lstat_result)
-                            if k.startswith("st_")
-                        }
-                    if "link" in namespaces:
-                        info["link"] = self._make_link_info(
-                            os.path.join(sys_path, dir_entry.name)
-                        )
-                    if "access" in namespaces:
-                        stat_result = dir_entry.stat()
-                        info["access"] = self._make_access_from_stat(stat_result)
+                        if requires_stat:
+                            stat_result = dir_entry.stat()
+                            if "details" in namespaces:
+                                info["details"] = self._make_details_from_stat(
+                                    stat_result
+                                )
+                            if "stat" in namespaces:
+                                info["stat"] = {
+                                    k: getattr(stat_result, k)
+                                    for k in dir(stat_result)
+                                    if k.startswith("st_")
+                                }
+                            if "access" in namespaces:
+                                info["access"] = self._make_access_from_stat(
+                                    stat_result
+                                )
+                        if "lstat" in namespaces:
+                            lstat_result = dir_entry.stat(follow_symlinks=False)
+                            info["lstat"] = {
+                                k: getattr(lstat_result, k)
+                                for k in dir(lstat_result)
+                                if k.startswith("st_")
+                            }
+                        if "link" in namespaces:
+                            info["link"] = self._make_link_info(
+                                os.path.join(sys_path, dir_entry.name)
+                            )
 
-                    yield Info(info)
+                        yield Info(info)
+                finally:
+                    if sys.version_info >= (3, 6):
+                        scandir_iter.close()
 
     else:
 
@@ -656,10 +664,10 @@ class OSFS(FS):
         if "details" in info:
             details = info["details"]
             if "accessed" in details or "modified" in details:
-                _accessed = typing.cast(int, details.get("accessed"))
-                _modified = typing.cast(int, details.get("modified", _accessed))
-                accessed = int(_modified if _accessed is None else _accessed)
-                modified = int(_modified)
+                _accessed = typing.cast(float, details.get("accessed"))
+                _modified = typing.cast(float, details.get("modified", _accessed))
+                accessed = float(_modified if _accessed is None else _accessed)
+                modified = float(_modified)
                 if accessed is not None or modified is not None:
                     with convert_os_errors("setinfo", path):
                         os.utime(sys_path, (accessed, modified))
@@ -673,6 +681,6 @@ class OSFS(FS):
             raise errors.InvalidCharsInPath(
                 path,
                 msg="path '{path}' could not be encoded for the filesystem (check LANG"
-                    " env var); {error}".format(path=path, error=error),
+                " env var); {error}".format(path=path, error=error),
             )
         return super(OSFS, self).validatepath(path)

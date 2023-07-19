@@ -8,15 +8,12 @@ searching etc. See :ref:`walking` for details.
 from __future__ import unicode_literals
 
 import typing
-from collections import defaultdict
-from collections import deque
-from collections import namedtuple
+
+from collections import defaultdict, deque, namedtuple
 
 from ._repr import make_repr
 from .errors import FSError
-from .path import abspath
-from .path import combine
-from .path import normpath
+from .path import abspath, combine, normpath
 
 if typing.TYPE_CHECKING:
     from typing import (
@@ -25,12 +22,13 @@ if typing.TYPE_CHECKING:
         Collection,
         Iterator,
         List,
-        Optional,
         MutableMapping,
+        Optional,
         Text,
         Tuple,
         Type,
     )
+
     from .base import FS
     from .info import Info
 
@@ -50,34 +48,7 @@ Step = namedtuple("Step", "path, dirs, files")
 
 
 class Walker(object):
-    """A walker object recursively lists directories in a filesystem.
-
-    Arguments:
-        ignore_errors (bool): If `True`, any errors reading a
-            directory will be ignored, otherwise exceptions will
-            be raised.
-        on_error (callable, optional): If ``ignore_errors`` is `False`,
-            then this callable will be invoked for a path and the exception
-            object. It should return `True` to ignore the error, or `False`
-            to re-raise it.
-        search (str): If ``'breadth'`` then the directory will be
-            walked *top down*. Set to ``'depth'`` to walk *bottom up*.
-        filter (list, optional): If supplied, this parameter should be
-            a list of filename patterns, e.g. ``['*.py']``. Files will
-            only be returned if the final component matches one of the
-            patterns.
-        exclude (list, optional): If supplied, this parameter should be
-            a list of filename patterns, e.g. ``['~*']``. Files matching
-            any of these patterns will be removed from the walk.
-        filter_dirs (list, optional): A list of patterns that will be used
-            to match directories paths. The walk will only open directories
-            that match at least one of these patterns.
-        exclude_dirs (list, optional): A list of patterns that will be
-            used to filter out directories from the walk. e.g.
-            ``['*.svn', '*.git']``.
-        max_depth (int, optional): Maximum directory depth to walk.
-
-    """
+    """A walker object recursively lists directories in a filesystem."""
 
     def __init__(
         self,
@@ -91,6 +62,34 @@ class Walker(object):
         max_depth=None,  # type: Optional[int]
     ):
         # type: (...) -> None
+        """Create a new `Walker` instance.
+
+        Arguments:
+            ignore_errors (bool): If `True`, any errors reading a
+                directory will be ignored, otherwise exceptions will
+                be raised.
+            on_error (callable, optional): If ``ignore_errors`` is `False`,
+                then this callable will be invoked for a path and the
+                exception object. It should return `True` to ignore the error,
+                or `False` to re-raise it.
+            search (str): If ``"breadth"`` then the directory will be
+                walked *top down*. Set to ``"depth"`` to walk *bottom up*.
+            filter (list, optional): If supplied, this parameter should be
+                a list of filename patterns, e.g. ``["*.py"]``. Files will
+                only be returned if the final component matches one of the
+                patterns.
+            exclude (list, optional): If supplied, this parameter should be
+                a list of filename patterns, e.g. ``["~*"]``. Files matching
+                any of these patterns will be removed from the walk.
+            filter_dirs (list, optional): A list of patterns that will be used
+                to match directories paths. The walk will only open directories
+                that match at least one of these patterns.
+            exclude_dirs (list, optional): A list of patterns that will be
+                used to filter out directories from the walk. e.g.
+                ``['*.svn', '*.git']``.
+            max_depth (int, optional): Maximum directory depth to walk.
+
+        """
         if search not in ("breadth", "depth"):
             raise ValueError("search must be 'breadth' or 'depth'")
         self.ignore_errors = ignore_errors
@@ -114,21 +113,19 @@ class Walker(object):
     @classmethod
     def _ignore_errors(cls, path, error):
         # type: (Text, Exception) -> bool
-        """Default on_error callback."""
+        """Ignore dir scan errors when called."""
         return True
 
     @classmethod
     def _raise_errors(cls, path, error):
         # type: (Text, Exception) -> bool
-        """Callback to re-raise dir scan errors."""
+        """Re-raise dir scan errors when called."""
         return False
 
     @classmethod
     def _calculate_depth(cls, path):
         # type: (Text) -> int
-        """Calculate the 'depth' of a directory path (number of
-        components).
-        """
+        """Calculate the 'depth' of a directory path (i.e. count components)."""
         _path = path.strip("/")
         return _path.count("/") + 1 if _path else 0
 
@@ -147,24 +144,24 @@ class Walker(object):
         Returns:
             ~fs.walk.BoundWalker: a bound walker.
 
-        Example:
-            >>> from fs import open_fs
-            >>> from fs.walk import Walker
-            >>> home_fs = open_fs('~/')
-            >>> walker = Walker.bind(home_fs)
-            >>> for path in walker.files(filter=['*.py']):
-            ...     print(path)
+        Examples:
+            Use this method to explicitly bind a filesystem instance::
 
-        Unless you have written a customized walker class, you will be
-        unlikely to need to call this explicitly, as filesystem objects
-        already have a ``walk`` attribute which is a bound walker
-        object.
+                >>> walker = Walker.bind(my_fs)
+                >>> for path in walker.files(filter=['*.py']):
+                ...     print(path)
+                /foo.py
+                /bar.py
 
-        Example:
-            >>> from fs import open_fs
-            >>> home_fs = open_fs('~/')
-            >>> for path in home_fs.walk.files(filter=['*.py']):
-            ...     print(path)
+            Unless you have written a customized walker class, you will
+            be unlikely to need to call this explicitly, as filesystem
+            objects already have a ``walk`` attribute which is a bound
+            walker object::
+
+                >>> for path in my_fs.walk.files(filter=['*.py']):
+                ...     print(path)
+                /foo.py
+                /bar.py
 
         """
         return BoundWalker(fs)
@@ -198,8 +195,7 @@ class Walker(object):
 
     def _check_open_dir(self, fs, path, info):
         # type: (FS, Text, Info) -> bool
-        """Check if a directory should be considered in the walk.
-        """
+        """Check if a directory should be considered in the walk."""
         if self.exclude_dirs is not None and fs.match(self.exclude_dirs, info.name):
             return False
         if self.filter_dirs is not None and not fs.match(self.filter_dirs, info.name):
@@ -263,7 +259,6 @@ class Walker(object):
             bool: `True` if the file should be included.
 
         """
-
         if self.exclude is not None and fs.match(self.exclude, info.name):
             return False
         return fs.match(self.filter, info.name)
@@ -319,14 +314,16 @@ class Walker(object):
         `~fs.info.Info` objects for directories and files in ``<path>``.
 
         Example:
-            >>> home_fs = open_fs('~/')
             >>> walker = Walker(filter=['*.py'])
-            >>> namespaces = ['details']
-            >>> for path, dirs, files in walker.walk(home_fs, namespaces)
+            >>> for path, dirs, files in walker.walk(my_fs, namespaces=["details"]):
             ...    print("[{}]".format(path))
             ...    print("{} directories".format(len(dirs)))
             ...    total = sum(info.size for info in files)
-            ...    print("{} bytes {}".format(total))
+            ...    print("{} bytes".format(total))
+            [/]
+            2 directories
+            55 bytes
+            ...
 
         """
         _path = abspath(normpath(path))
@@ -411,8 +408,7 @@ class Walker(object):
         namespaces=None,  # type: Optional[Collection[Text]]
     ):
         # type: (...) -> Iterator[Tuple[Text, Optional[Info]]]
-        """Walk files using a *breadth first* search.
-        """
+        """Walk files using a *breadth first* search."""
         queue = deque([path])
         push = queue.appendleft
         pop = queue.pop
@@ -447,8 +443,7 @@ class Walker(object):
         namespaces=None,  # type: Optional[Collection[Text]]
     ):
         # type: (...) -> Iterator[Tuple[Text, Optional[Info]]]
-        """Walk files using a *depth first* search.
-        """
+        """Walk files using a *depth first* search."""
         # No recursion!
 
         _combine = combine
@@ -495,28 +490,30 @@ class Walker(object):
 class BoundWalker(typing.Generic[_F]):
     """A class that binds a `Walker` instance to a `FS` instance.
 
-    Arguments:
-        fs (FS): A filesystem instance.
-        walker_class (type): A `~fs.walk.WalkerBase`
-            sub-class. The default uses `~fs.walk.Walker`.
-
     You will typically not need to create instances of this class
     explicitly. Filesystems have a `~FS.walk` property which returns a
     `BoundWalker` object.
 
     Example:
-        >>> import fs
-        >>> home_fs = fs.open_fs('~/')
-        >>> home_fs.walk
-        BoundWalker(OSFS('/Users/will', encoding='utf-8'))
+        >>> tmp_fs = fs.tempfs.TempFS()
+        >>> tmp_fs.walk
+        BoundWalker(TempFS())
 
-    A `BoundWalker` is callable. Calling it is an alias for
-    `~fs.walk.BoundWalker.walk`.
+    A `BoundWalker` is callable. Calling it is an alias for the
+    `~fs.walk.BoundWalker.walk` method.
 
     """
 
     def __init__(self, fs, walker_class=Walker):
         # type: (_F, Type[Walker]) -> None
+        """Create a new walker bound to the given filesystem.
+
+        Arguments:
+            fs (FS): A filesystem instance.
+            walker_class (type): A `~fs.walk.WalkerBase`
+                sub-class. The default uses `~fs.walk.Walker`.
+
+        """
         self.fs = fs
         self.walker_class = walker_class
 
@@ -526,8 +523,7 @@ class BoundWalker(typing.Generic[_F]):
 
     def _make_walker(self, *args, **kwargs):
         # type: (*Any, **Any) -> Walker
-        """Create a walker instance.
-        """
+        """Create a walker instance."""
         walker = self.walker_class(*args, **kwargs)
         return walker
 
@@ -578,13 +574,16 @@ class BoundWalker(typing.Generic[_F]):
             `~fs.info.Info` objects for directories and files in ``<path>``.
 
         Example:
-            >>> home_fs = open_fs('~/')
             >>> walker = Walker(filter=['*.py'])
-            >>> for path, dirs, files in walker.walk(home_fs, namespaces=['details']):
+            >>> for path, dirs, files in walker.walk(my_fs, namespaces=['details']):
             ...     print("[{}]".format(path))
             ...     print("{} directories".format(len(dirs)))
             ...     total = sum(info.size for info in files)
-            ...     print("{} bytes {}".format(total))
+            ...     print("{} bytes".format(total))
+            [/]
+            2 directories
+            55 bytes
+            ...
 
         This method invokes `Walker.walk` with bound `FS` object.
 

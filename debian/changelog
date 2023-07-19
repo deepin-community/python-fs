@@ -1,3 +1,22 @@
+python-fs (2.4.16-2) unstable; urgency=medium
+
+  [ Debian Janitor ]
+  * Remove constraints unnecessary since buster
+
+ -- Jelmer Vernooĳ <jelmer@debian.org>  Mon, 17 Oct 2022 03:41:13 +0100
+
+python-fs (2.4.16-1) unstable; urgency=medium
+
+  [ Yao Wei (魏銘廷) ]
+  * debian/watch: Change GitHub archive URL
+  * New upstream version 2.4.16
+  * debian/control:
+    - Update standards version to 4.6.1, no changes needed
+    - Update dependencies
+    - Add Build-Depends: python3-parameterized for running tests
+
+ -- Yao Wei (魏銘廷) <mwei@debian.org>  Sat, 09 Jul 2022 17:28:18 +0800
+
 python-fs (2.4.12-1) unstable; urgency=medium
 
   [ Debian Janitor ]

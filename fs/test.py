@@ -5,35 +5,34 @@ All Filesystems should be able to pass these.
 
 """
 
-from __future__ import absolute_import
-from __future__ import unicode_literals
+from __future__ import absolute_import, unicode_literals
 
-from datetime import datetime
 import io
 import itertools
 import json
-import math
 import os
+import six
 import time
 import unittest
+import warnings
+from datetime import datetime
+from six import text_type
 
 import fs.copy
 import fs.move
-from fs import ResourceType, Seek
-from fs import errors
-from fs import walk
-from fs import glob
+from fs import ResourceType, Seek, errors, glob, walk
 from fs.opener import open_fs
 from fs.subfs import ClosingSubFS, SubFS
-
-import pytz
-import six
-from six import text_type
 
 if six.PY2:
     import collections as collections_abc
 else:
     import collections.abc as collections_abc
+
+try:
+    from datetime import timezone
+except ImportError:
+    from ._tzcompat import timezone  # type: ignore
 
 
 UNICODE_TEXT = """
@@ -245,13 +244,15 @@ Box drawing alignment tests:                                          █
 
 
 class FSTestCases(object):
-    """Basic FS tests.
-    """
+    """Basic FS tests."""
+
+    data1 = b"foo" * 256 * 1024
+    data2 = b"bar" * 2 * 256 * 1024
+    data3 = b"baz" * 3 * 256 * 1024
+    data4 = b"egg" * 7 * 256 * 1024
 
     def make_fs(self):
-        """Return an FS instance.
-
-        """
+        """Return an FS instance."""
         raise NotImplementedError("implement me")
 
     def destroy_fs(self, fs):
@@ -288,6 +289,15 @@ class FSTestCases(object):
 
         """
         self.assertFalse(self.fs.exists(path))
+
+    def assert_isempty(self, path):
+        """Assert a path is an empty directory.
+
+        Arguments:
+            path (str): A path on the filesystem.
+
+        """
+        self.assertTrue(self.fs.isempty(path))
 
     def assert_isfile(self, path):
         """Assert a path is a file.
@@ -430,15 +440,13 @@ class FSTestCases(object):
         self.fs.hasurl("a/b/c/foo/bar")
 
     def test_geturl_purpose(self):
-        """Check an unknown purpose raises a NoURL error.
-        """
+        """Check an unknown purpose raises a NoURL error."""
         self.fs.create("foo")
         with self.assertRaises(errors.NoURL):
             self.fs.geturl("foo", purpose="__nosuchpurpose__")
 
     def test_validatepath(self):
-        """Check validatepath returns an absolute path.
-        """
+        """Check validatepath returns an absolute path."""
         path = self.fs.validatepath("foo")
         self.assertEqual(path, "/foo")
 
@@ -456,6 +464,7 @@ class FSTestCases(object):
         root_info = self.fs.getinfo("/")
         self.assertEqual(root_info.name, "")
         self.assertTrue(root_info.is_dir)
+        self.assertIn("basic", root_info.namespaces)
 
         # Make a file of known size
         self.fs.writebytes("foo", b"bar")
@@ -463,17 +472,20 @@ class FSTestCases(object):
 
         # Check basic namespace
         info = self.fs.getinfo("foo").raw
+        self.assertIn("basic", info)
         self.assertIsInstance(info["basic"]["name"], text_type)
         self.assertEqual(info["basic"]["name"], "foo")
         self.assertFalse(info["basic"]["is_dir"])
 
         # Check basic namespace dir
         info = self.fs.getinfo("dir").raw
+        self.assertIn("basic", info)
         self.assertEqual(info["basic"]["name"], "dir")
         self.assertTrue(info["basic"]["is_dir"])
 
         # Get the info
         info = self.fs.getinfo("foo", namespaces=["details"]).raw
+        self.assertIn("basic", info)
         self.assertIsInstance(info, dict)
         self.assertEqual(info["details"]["size"], 3)
         self.assertEqual(info["details"]["type"], int(ResourceType.file))
@@ -884,8 +896,9 @@ class FSTestCases(object):
             self.assertFalse(f.closed)
         self.assertTrue(f.closed)
 
-        iter_lines = iter(self.fs.open("text"))
-        self.assertEqual(next(iter_lines), "Hello\n")
+        with self.fs.open("text") as f:
+            iter_lines = iter(f)
+            self.assertEqual(next(iter_lines), "Hello\n")
 
         with self.fs.open("unicode", "w") as f:
             self.assertEqual(12, f.write("Héllo\nWörld\n"))
@@ -1099,6 +1112,7 @@ class FSTestCases(object):
             self.fs.removedir("foo/bar")
 
     def test_removetree(self):
+        self.fs.makedirs("spam")
         self.fs.makedirs("foo/bar/baz")
         self.fs.makedirs("foo/egg")
         self.fs.makedirs("foo/a/b/c/d/e")
@@ -1114,18 +1128,62 @@ class FSTestCases(object):
 
         self.fs.removetree("foo")
         self.assert_not_exists("foo")
+        self.assert_exists("spam")
+
+        # Errors on files
+        self.fs.create("bar")
+        with self.assertRaises(errors.DirectoryExpected):
+            self.fs.removetree("bar")
+
+        # Errors on non-existing path
+        with self.assertRaises(errors.ResourceNotFound):
+            self.fs.removetree("foofoo")
+
+    def test_removetree_root(self):
+        self.fs.makedirs("foo/bar/baz")
+        self.fs.makedirs("foo/egg")
+        self.fs.makedirs("foo/a/b/c/d/e")
+        self.fs.create("foo/egg.txt")
+        self.fs.create("foo/bar/egg.bin")
+        self.fs.create("foo/a/b/c/1.txt")
+        self.fs.create("foo/a/b/c/2.txt")
+        self.fs.create("foo/a/b/c/3.txt")
+
+        self.assert_exists("foo/egg.txt")
+        self.assert_exists("foo/bar/egg.bin")
+
+        # removetree("/") removes the contents,
+        # but not the root folder itself
+        self.fs.removetree("/")
+        self.assert_exists("/")
+        self.assert_isempty("/")
+
+        # we check we can create a file after
+        # to catch potential issues with the
+        # root folder being deleted on faulty
+        # implementations
+        self.fs.create("egg")
+        self.fs.makedir("yolk")
+        self.assert_exists("egg")
+        self.assert_exists("yolk")
 
     def test_setinfo(self):
         self.fs.create("birthday.txt")
-        now = math.floor(time.time())
+        now = time.time()
 
         change_info = {"details": {"accessed": now + 60, "modified": now + 60 * 60}}
         self.fs.setinfo("birthday.txt", change_info)
-        new_info = self.fs.getinfo("birthday.txt", namespaces=["details"]).raw
-        if "accessed" in new_info.get("_write", []):
-            self.assertEqual(new_info["details"]["accessed"], now + 60)
-        if "modified" in new_info.get("_write", []):
-            self.assertEqual(new_info["details"]["modified"], now + 60 * 60)
+        new_info = self.fs.getinfo("birthday.txt", namespaces=["details"])
+        can_write_acccess = new_info.is_writeable("details", "accessed")
+        can_write_modified = new_info.is_writeable("details", "modified")
+        if can_write_acccess:
+            self.assertAlmostEqual(
+                new_info.get("details", "accessed"), now + 60, places=4
+            )
+        if can_write_modified:
+            self.assertAlmostEqual(
+                new_info.get("details", "modified"), now + 60 * 60, places=4
+            )
 
         with self.assertRaises(errors.ResourceNotFound):
             self.fs.setinfo("nothing", {})
@@ -1134,11 +1192,12 @@ class FSTestCases(object):
         self.fs.create("birthday.txt")
         self.fs.settimes("birthday.txt", accessed=datetime(2016, 7, 5))
         info = self.fs.getinfo("birthday.txt", namespaces=["details"])
-        writeable = info.get("details", "_write", [])
-        if "accessed" in writeable:
-            self.assertEqual(info.accessed, datetime(2016, 7, 5, tzinfo=pytz.UTC))
-        if "modified" in writeable:
-            self.assertEqual(info.modified, datetime(2016, 7, 5, tzinfo=pytz.UTC))
+        can_write_acccess = info.is_writeable("details", "accessed")
+        can_write_modified = info.is_writeable("details", "modified")
+        if can_write_acccess:
+            self.assertEqual(info.accessed, datetime(2016, 7, 5, tzinfo=timezone.utc))
+        if can_write_modified:
+            self.assertEqual(info.modified, datetime(2016, 7, 5, tzinfo=timezone.utc))
 
     def test_touch(self):
         self.fs.touch("new.txt")
@@ -1146,7 +1205,7 @@ class FSTestCases(object):
         self.fs.settimes("new.txt", datetime(2016, 7, 5))
         info = self.fs.getinfo("new.txt", namespaces=["details"])
         if info.is_writeable("details", "accessed"):
-            self.assertEqual(info.accessed, datetime(2016, 7, 5, tzinfo=pytz.UTC))
+            self.assertEqual(info.accessed, datetime(2016, 7, 5, tzinfo=timezone.utc))
             now = time.time()
             self.fs.touch("new.txt")
             accessed = self.fs.getinfo("new.txt", namespaces=["details"]).raw[
@@ -1196,22 +1255,17 @@ class FSTestCases(object):
 
     def _test_upload(self, workers):
         """Test fs.copy with varying number of worker threads."""
-        data1 = b"foo" * 256 * 1024
-        data2 = b"bar" * 2 * 256 * 1024
-        data3 = b"baz" * 3 * 256 * 1024
-        data4 = b"egg" * 7 * 256 * 1024
-
         with open_fs("temp://") as src_fs:
-            src_fs.writebytes("foo", data1)
-            src_fs.writebytes("bar", data2)
-            src_fs.makedir("dir1").writebytes("baz", data3)
-            src_fs.makedirs("dir2/dir3").writebytes("egg", data4)
+            src_fs.writebytes("foo", self.data1)
+            src_fs.writebytes("bar", self.data2)
+            src_fs.makedir("dir1").writebytes("baz", self.data3)
+            src_fs.makedirs("dir2/dir3").writebytes("egg", self.data4)
             dst_fs = self.fs
             fs.copy.copy_fs(src_fs, dst_fs, workers=workers)
-            self.assertEqual(dst_fs.readbytes("foo"), data1)
-            self.assertEqual(dst_fs.readbytes("bar"), data2)
-            self.assertEqual(dst_fs.readbytes("dir1/baz"), data3)
-            self.assertEqual(dst_fs.readbytes("dir2/dir3/egg"), data4)
+            self.assertEqual(dst_fs.readbytes("foo"), self.data1)
+            self.assertEqual(dst_fs.readbytes("bar"), self.data2)
+            self.assertEqual(dst_fs.readbytes("dir1/baz"), self.data3)
+            self.assertEqual(dst_fs.readbytes("dir2/dir3/egg"), self.data4)
 
     def test_upload_0(self):
         self._test_upload(0)
@@ -1227,21 +1281,17 @@ class FSTestCases(object):
 
     def _test_download(self, workers):
         """Test fs.copy with varying number of worker threads."""
-        data1 = b"foo" * 256 * 1024
-        data2 = b"bar" * 2 * 256 * 1024
-        data3 = b"baz" * 3 * 256 * 1024
-        data4 = b"egg" * 7 * 256 * 1024
         src_fs = self.fs
         with open_fs("temp://") as dst_fs:
-            src_fs.writebytes("foo", data1)
-            src_fs.writebytes("bar", data2)
-            src_fs.makedir("dir1").writebytes("baz", data3)
-            src_fs.makedirs("dir2/dir3").writebytes("egg", data4)
+            src_fs.writebytes("foo", self.data1)
+            src_fs.writebytes("bar", self.data2)
+            src_fs.makedir("dir1").writebytes("baz", self.data3)
+            src_fs.makedirs("dir2/dir3").writebytes("egg", self.data4)
             fs.copy.copy_fs(src_fs, dst_fs, workers=workers)
-            self.assertEqual(dst_fs.readbytes("foo"), data1)
-            self.assertEqual(dst_fs.readbytes("bar"), data2)
-            self.assertEqual(dst_fs.readbytes("dir1/baz"), data3)
-            self.assertEqual(dst_fs.readbytes("dir2/dir3/egg"), data4)
+            self.assertEqual(dst_fs.readbytes("foo"), self.data1)
+            self.assertEqual(dst_fs.readbytes("bar"), self.data2)
+            self.assertEqual(dst_fs.readbytes("dir1/baz"), self.data3)
+            self.assertEqual(dst_fs.readbytes("dir2/dir3/egg"), self.data4)
 
     def test_download_0(self):
         self._test_download(0)
@@ -1495,6 +1545,10 @@ class FSTestCases(object):
             data = f.read()
         self.assertEqual(data, b"bar")
 
+        # upload to non-existing path (/spam/eggs)
+        with self.assertRaises(errors.ResourceNotFound):
+            self.fs.upload("/spam/eggs", bytes_file)
+
     def test_upload_chunk_size(self):
         test_data = b"bar" * 128
         bytes_file = io.BytesIO(test_data)
@@ -1590,8 +1644,10 @@ class FSTestCases(object):
         self.assert_bytes("foo2", b"help")
 
         # Test __del__ doesn't throw traceback
-        f = self.fs.open("foo2", "r")
-        del f
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            f = self.fs.open("foo2", "r")
+            del f
 
         with self.assertRaises(IOError):
             with self.fs.open("foo2", "r") as f:
@@ -1681,6 +1737,24 @@ class FSTestCases(object):
         self._test_copy_dir("temp://")
         self._test_copy_dir_write("temp://")
 
+    def test_move_dir_same_fs(self):
+        self.fs.makedirs("foo/bar/baz")
+        self.fs.makedir("egg")
+        self.fs.writetext("top.txt", "Hello, World")
+        self.fs.writetext("/foo/bar/baz/test.txt", "Goodbye, World")
+
+        fs.move.move_dir(self.fs, "foo", self.fs, "foo2")
+
+        expected = {"/egg", "/foo2", "/foo2/bar", "/foo2/bar/baz"}
+        self.assertEqual(set(walk.walk_dirs(self.fs)), expected)
+        self.assert_text("top.txt", "Hello, World")
+        self.assert_text("/foo2/bar/baz/test.txt", "Goodbye, World")
+
+        self.assertEqual(sorted(self.fs.listdir("/")), ["egg", "foo2", "top.txt"])
+        self.assertEqual(
+            sorted(x.name for x in self.fs.scandir("/")), ["egg", "foo2", "top.txt"]
+        )
+
     def _test_move_dir_write(self, protocol):
         # Test moving to this filesystem from another.
         other_fs = open_fs(protocol)
@@ -1703,19 +1777,6 @@ class FSTestCases(object):
     def test_move_dir_temp(self):
         self._test_move_dir_write("temp://")
 
-    def test_move_same_fs(self):
-        self.fs.makedirs("foo/bar/baz")
-        self.fs.makedir("egg")
-        self.fs.writetext("top.txt", "Hello, World")
-        self.fs.writetext("/foo/bar/baz/test.txt", "Goodbye, World")
-
-        fs.move.move_dir(self.fs, "foo", self.fs, "foo2")
-
-        expected = {"/egg", "/foo2", "/foo2/bar", "/foo2/bar/baz"}
-        self.assertEqual(set(walk.walk_dirs(self.fs)), expected)
-        self.assert_text("top.txt", "Hello, World")
-        self.assert_text("/foo2/bar/baz/test.txt", "Goodbye, World")
-
     def test_move_file_same_fs(self):
         text = "Hello, World"
         self.fs.makedir("foo").writetext("test.txt", text)
@@ -1724,6 +1785,9 @@ class FSTestCases(object):
         fs.move.move_file(self.fs, "foo/test.txt", self.fs, "foo/test2.txt")
         self.assert_not_exists("foo/test.txt")
         self.assert_text("foo/test2.txt", text)
+
+        self.assertEqual(self.fs.listdir("foo"), ["test2.txt"])
+        self.assertEqual(next(self.fs.scandir("foo")).name, "test2.txt")
 
     def _test_move_file(self, protocol):
         other_fs = open_fs(protocol)

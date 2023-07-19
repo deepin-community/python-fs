@@ -1,7 +1,8 @@
+import typing
+
+import platform
 import re
 import six
-import platform
-import typing
 
 if typing.TYPE_CHECKING:
     from typing import Text
@@ -11,13 +12,15 @@ _WINDOWS_PLATFORM = platform.system() == "Windows"
 
 def url_quote(path_snippet):
     # type: (Text) -> Text
-    """
-    On Windows, it will separate drive letter and quote windows
-    path alone. No magic on Unix-alie path, just pythonic
-    `pathname2url`
+    """Quote a URL without quoting the Windows drive letter, if any.
+
+    On Windows, it will separate drive letter and quote Windows
+    path alone. No magic on Unix-like path, just pythonic
+    `~urllib.request.pathname2url`.
 
     Arguments:
-       path_snippet: a file path, relative or absolute.
+       path_snippet (str): a file path, relative or absolute.
+
     """
     if _WINDOWS_PLATFORM and _has_drive_letter(path_snippet):
         drive_letter, path = path_snippet.split(":", 1)
@@ -34,17 +37,19 @@ def url_quote(path_snippet):
 
 def _has_drive_letter(path_snippet):
     # type: (Text) -> bool
-    """
-    The following path will get True
-    D:/Data
-    C:\\My Dcouments\\ test
-
-    And will get False
-
-    /tmp/abc:test
+    """Check whether a path contains a drive letter.
 
     Arguments:
-       path_snippet: a file path, relative or absolute.
+       path_snippet (str): a file path, relative or absolute.
+
+    Example:
+        >>> _has_drive_letter("D:/Data")
+        True
+        >>> _has_drive_letter(r"C:\\System32\\ test")
+        True
+        >>> _has_drive_letter("/tmp/abc:test")
+        False
+
     """
     windows_drive_pattern = ".:[/\\\\].*$"
     return re.match(windows_drive_pattern, path_snippet) is not None

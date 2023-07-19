@@ -9,13 +9,14 @@ Build-Depends: debhelper-compat (= 13),
                python3-all:any,
                python3-setuptools,
                python3-tz,
-               python3-six (>= 1.10.0),
+               python3-six,
                python3-appdirs <!nocheck>,
                python3-coverage <!nocheck>,
                python3-pytest <!nocheck>,
                python3-mock <!nocheck>,
+               python3-parameterized <!nocheck>,
                python3-sphinx,
-Standards-Version: 4.5.0
+Standards-Version: 4.6.1
 Homepage: https://pypi.python.org/pypi/fs/
 Vcs-Git: https://salsa.debian.org/python-team/packages/python-fs.git
 Vcs-Browser: https://salsa.debian.org/python-team/packages/python-fs
@@ -24,7 +25,7 @@ Testsuite: autopkgtest-pkg-python
 Package: python3-fs
 Architecture: all
 Depends: python3-tz,
-         python3-six (>= 1.10.0),
+         python3-six,
          ${misc:Depends},
          ${python3:Depends},
          ${sphinxdoc:Depends},

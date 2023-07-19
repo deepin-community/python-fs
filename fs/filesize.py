@@ -11,8 +11,7 @@ See Also:
 
 """
 
-from __future__ import division
-from __future__ import unicode_literals
+from __future__ import division, unicode_literals
 
 import typing
 
@@ -36,7 +35,7 @@ def _to_str(size, suffixes, base):
 
     # TODO (dargueta): Don't rely on unit or suffix being defined in the loop.
     for i, suffix in enumerate(suffixes, 2):  # noqa: B007
-        unit = base ** i
+        unit = base**i
         if size < unit:
             break
     return "{:,.1f} {}".format((base * size / unit), suffix)
@@ -61,7 +60,7 @@ def traditional(size):
         `str`: A string containing an abbreviated file size and units.
 
     Example:
-        >>> filesize.traditional(30000)
+        >>> fs.filesize.traditional(30000)
         '29.3 KB'
 
     """
@@ -87,7 +86,7 @@ def binary(size):
         `str`: A string containing a abbreviated file size and units.
 
     Example:
-        >>> filesize.binary(30000)
+        >>> fs.filesize.binary(30000)
         '29.3 KiB'
 
     """
@@ -112,7 +111,7 @@ def decimal(size):
         `str`: A string containing a abbreviated file size and units.
 
     Example:
-        >>> filesize.decimal(30000)
+        >>> fs.filesize.decimal(30000)
         '30.0 kB'
 
     """

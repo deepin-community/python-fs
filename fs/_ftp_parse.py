@@ -1,31 +1,32 @@
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, print_function, unicode_literals
 
-import unicodedata
-import datetime
 import re
 import time
+import unicodedata
+from datetime import datetime
 
-from pytz import UTC
+try:
+    from datetime import timezone
+except ImportError:
+    from ._tzcompat import timezone  # type: ignore
 
 from .enums import ResourceType
 from .permissions import Permissions
 
-
-EPOCH_DT = datetime.datetime.fromtimestamp(0, UTC)
+EPOCH_DT = datetime.fromtimestamp(0, timezone.utc)
 
 
 RE_LINUX = re.compile(
     r"""
     ^
-    ([ldrwx-]{10})
+    ([-dlpscbD])
+    ([r-][w-][xsS-][r-][w-][xsS-][r-][w-][xtT-][\.\+]?)
     \s+?
     (\d+)
     \s+?
-    ([\w\-]+)
+    ([A-Za-z0-9][A-Za-z0-9\-\.\_\@]*\$?)
     \s+?
-    ([\w\-]+)
+    ([A-Za-z0-9][A-Za-z0-9\-\.\_\@]*\$?)
     \s+?
     (\d+)
     \s+?
@@ -55,9 +56,7 @@ RE_WINDOWSNT = re.compile(
 
 
 def get_decoders():
-    """
-    Returns all available FTP LIST line decoders with their matching regexes.
-    """
+    """Return all available FTP LIST line decoders with their matching regexes."""
     decoders = [
         (RE_LINUX, decode_linux),
         (RE_WINDOWSNT, decode_windowsnt),
@@ -99,7 +98,7 @@ def _parse_time(t, formats):
     day = _t.tm_mday
     hour = _t.tm_hour
     minutes = _t.tm_min
-    dt = datetime.datetime(year, month, day, hour, minutes, tzinfo=UTC)
+    dt = datetime(year, month, day, hour, minutes, tzinfo=timezone.utc)
 
     epoch_time = (dt - EPOCH_DT).total_seconds()
     return epoch_time
@@ -110,14 +109,14 @@ def _decode_linux_time(mtime):
 
 
 def decode_linux(line, match):
-    perms, links, uid, gid, size, mtime, name = match.groups()
-    is_link = perms.startswith("l")
-    is_dir = perms.startswith("d") or is_link
+    ty, perms, links, uid, gid, size, mtime, name = match.groups()
+    is_link = ty == "l"
+    is_dir = ty == "d" or is_link
     if is_link:
         name, _, _link_name = name.partition("->")
         name = name.strip()
         _link_name = _link_name.strip()
-    permissions = Permissions.parse(perms[1:])
+    permissions = Permissions.parse(perms)
 
     mtime_epoch = _decode_linux_time(mtime)
 
@@ -148,13 +147,34 @@ def _decode_windowsnt_time(mtime):
 
 
 def decode_windowsnt(line, match):
-    """
-    Decodes a Windows NT FTP LIST line like one of these:
+    """Decode a Windows NT FTP LIST line.
 
-    `11-02-18  02:12PM       <DIR>          images`
-    `11-02-18  03:33PM                 9276 logo.gif`
+    Examples:
+        Decode a directory line::
 
-    Alternatively, the time (02:12PM) might also be present in 24-hour format (14:12).
+            >>> line = "11-02-18  02:12PM       <DIR>          images"
+            >>> match = RE_WINDOWSNT.match(line)
+            >>> pprint(decode_windowsnt(line, match))
+            {'basic': {'is_dir': True, 'name': 'images'},
+             'details': {'modified': 1518358320.0, 'type': 1},
+             'ftp': {'ls': '11-02-18  02:12PM       <DIR>          images'}}
+
+        Decode a file line::
+
+            >>> line = "11-02-18  03:33PM                 9276 logo.gif"
+            >>> match = RE_WINDOWSNT.match(line)
+            >>> pprint(decode_windowsnt(line, match))
+            {'basic': {'is_dir': False, 'name': 'logo.gif'},
+             'details': {'modified': 1518363180.0, 'size': 9276, 'type': 2},
+             'ftp': {'ls': '11-02-18  03:33PM                 9276 logo.gif'}}
+
+        Alternatively, the time might also be present in 24-hour format::
+
+            >>> line = "11-02-18  15:33                   9276 logo.gif"
+            >>> match = RE_WINDOWSNT.match(line)
+            >>> decode_windowsnt(line, match)["details"]["modified"]
+            1518363180.0
+
     """
     is_dir = match.group("size") == "<DIR>"
 

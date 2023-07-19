@@ -1,32 +1,37 @@
 # coding: utf-8
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, print_function, unicode_literals
 
-import socket
+import calendar
+import datetime
 import os
 import platform
 import shutil
+import socket
 import tempfile
 import time
 import unittest
 import uuid
 
-import pytest
-from six import text_type
+try:
+    from unittest import mock
+except ImportError:
+    import mock
 
-from ftplib import error_perm
-from ftplib import error_temp
-
+from ftplib import error_perm, error_temp
 from pyftpdlib.authorizers import DummyAuthorizer
+from six import BytesIO, text_type
 
 from fs import errors
-from fs.opener import open_fs
 from fs.ftpfs import FTPFS, ftp_errors
+from fs.opener import open_fs
 from fs.path import join
 from fs.subfs import SubFS
 from fs.test import FSTestCases
 
+try:
+    from pytest import mark
+except ImportError:
+    from . import mark
 
 # Prevent socket timeouts from slowing tests too much
 socket.setdefaulttimeout(1)
@@ -85,6 +90,10 @@ class TestFTPFSClass(unittest.TestCase):
         self.assertIsInstance(ftp_fs, FTPFS)
         self.assertEqual(ftp_fs.host, "ftp.example.org")
 
+        ftps_fs = open_fs("ftps://will:wfc@ftp.example.org")
+        self.assertIsInstance(ftps_fs, FTPFS)
+        self.assertTrue(ftps_fs.tls)
+
 
 class TestFTPErrors(unittest.TestCase):
     """Test the ftp_errors context manager."""
@@ -129,9 +138,9 @@ class TestFTPErrors(unittest.TestCase):
         )
 
 
-@pytest.mark.slow
+@mark.slow
+@unittest.skipIf(platform.python_implementation() == "PyPy", "ftp unreliable with PyPy")
 class TestFTPFS(FSTestCases, unittest.TestCase):
-
     user = "user"
     pasw = "1234"
 
@@ -149,7 +158,7 @@ class TestFTPFS(FSTestCases, unittest.TestCase):
         cls.server.shutdown_after = -1
         cls.server.handler.authorizer = DummyAuthorizer()
         cls.server.handler.authorizer.add_user(
-            cls.user, cls.pasw, cls._temp_path, perm="elradfmw"
+            cls.user, cls.pasw, cls._temp_path, perm="elradfmwT"
         )
         cls.server.handler.authorizer.add_anonymous(cls._temp_path)
         cls.server.start()
@@ -210,6 +219,23 @@ class TestFTPFS(FSTestCases, unittest.TestCase):
             ),
         )
 
+    def test_setinfo(self):
+        # TODO: temporary test, since FSTestCases.test_setinfo is broken.
+        self.fs.create("bar")
+        original_modified = self.fs.getinfo("bar", ("details",)).modified
+        new_modified = original_modified - datetime.timedelta(hours=1)
+        new_modified_stamp = calendar.timegm(new_modified.timetuple())
+        self.fs.setinfo("bar", {"details": {"modified": new_modified_stamp}})
+        new_modified_get = self.fs.getinfo("bar", ("details",)).modified
+        if original_modified.microsecond == 0 or new_modified_get.microsecond == 0:
+            original_modified = original_modified.replace(microsecond=0)
+            new_modified_get = new_modified_get.replace(microsecond=0)
+        if original_modified.second == 0 or new_modified_get.second == 0:
+            original_modified = original_modified.replace(second=0)
+            new_modified_get = new_modified_get.replace(second=0)
+        new_modified_get = new_modified_get + datetime.timedelta(hours=1)
+        self.assertEqual(original_modified, new_modified_get)
+
     def test_host(self):
         self.assertEqual(self.fs.host, self.server.host)
 
@@ -229,6 +255,23 @@ class TestFTPFS(FSTestCases, unittest.TestCase):
         self.fs.features
         del self.fs.features["UTF8"]
         self.assertFalse(self.fs.getmeta().get("unicode_paths"))
+
+    def test_getinfo_modified(self):
+        self.assertIn("MDTM", self.fs.features)
+        self.fs.create("bar")
+        mtime_detail = self.fs.getinfo("bar", ("basic", "details")).modified
+        mtime_modified = self.fs.getmodified("bar")
+        # Microsecond and seconds might not actually be supported by all
+        # FTP commands, so we strip them before comparing if it looks
+        # like at least one of the two values does not contain them.
+        replacement = {}
+        if mtime_detail.microsecond == 0 or mtime_modified.microsecond == 0:
+            replacement["microsecond"] = 0
+        if mtime_detail.second == 0 or mtime_modified.second == 0:
+            replacement["second"] = 0
+        self.assertEqual(
+            mtime_detail.replace(**replacement), mtime_modified.replace(**replacement)
+        )
 
     def test_opener_path(self):
         self.fs.makedir("foo")
@@ -267,6 +310,12 @@ class TestFTPFS(FSTestCases, unittest.TestCase):
         with open_fs(url, create=True) as ftp_fs:
             self.assertTrue(ftp_fs.isfile("foo"))
 
+    def test_upload_connection(self):
+        with mock.patch.object(self.fs, "_manage_ftp") as _manage_ftp:
+            self.fs.upload("foo", BytesIO(b"hello"))
+        self.assertEqual(self.fs.gettext("foo"), "hello")
+        _manage_ftp.assert_not_called()
+
 
 class TestFTPFSNoMLSD(TestFTPFS):
     def make_fs(self):
@@ -279,9 +328,9 @@ class TestFTPFSNoMLSD(TestFTPFS):
         pass
 
 
-@pytest.mark.slow
+@mark.slow
+@unittest.skipIf(platform.python_implementation() == "PyPy", "ftp unreliable with PyPy")
 class TestAnonFTPFS(FSTestCases, unittest.TestCase):
-
     user = "anonymous"
     pasw = ""
 

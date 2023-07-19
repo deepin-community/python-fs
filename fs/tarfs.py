@@ -1,18 +1,18 @@
 """Manage the filesystem in a Tar archive.
 """
 
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import print_function, unicode_literals
+
+import typing
+from typing import IO, cast
 
 import os
-import tarfile
-import typing
-from collections import OrderedDict
-from typing import cast, IO
-
 import six
+import tarfile
+from collections import OrderedDict
 
 from . import errors
+from ._url_tools import url_quote
 from .base import FS
 from .compress import write_tar
 from .enums import ResourceType
@@ -20,13 +20,11 @@ from .errors import IllegalBackReference, NoURL
 from .info import Info
 from .iotools import RawWrapper
 from .opener import open_fs
+from .path import basename, frombase, isbase, normpath, parts, relpath
 from .permissions import Permissions
-from ._url_tools import url_quote
-from .path import relpath, basename, isbase, normpath, parts, frombase
 from .wrapfs import WrapFS
 
 if typing.TYPE_CHECKING:
-    from tarfile import TarInfo
     from typing import (
         Any,
         BinaryIO,
@@ -38,6 +36,9 @@ if typing.TYPE_CHECKING:
         Tuple,
         Union,
     )
+
+    from tarfile import TarInfo
+
     from .info import RawInfo
     from .subfs import SubFS
 
@@ -53,7 +54,6 @@ if six.PY2:
         # type: (TarInfo, Text) -> Dict[Text, object]
         return member.get_info(encoding, None)
 
-
 else:
 
     def _get_member_info(member, encoding):
@@ -66,10 +66,10 @@ else:
 class TarFS(WrapFS):
     """Read and write tar files.
 
-    There are two ways to open a TarFS for the use cases of reading
+    There are two ways to open a `TarFS` for the use cases of reading
     a tar file, and creating a new one.
 
-    If you open the TarFS with  ``write`` set to `False` (the
+    If you open the `TarFS` with  ``write`` set to `False` (the
     default), then the filesystem will be a read only filesystem which
     maps to the files and directories within the tar file. Files are
     decompressed on the fly when you open them.
@@ -79,9 +79,9 @@ class TarFS(WrapFS):
         with TarFS('foo.tar.gz') as tar_fs:
             readme = tar_fs.readtext('readme.txt')
 
-    If you open the TarFS with ``write`` set to `True`, then the TarFS
+    If you open the TarFS with ``write`` set to `True`, then the `TarFS`
     will be a empty temporary filesystem. Any files / directories you
-    create in the TarFS will be written in to a tar file when the TarFS
+    create in the `TarFS` will be written in to a tar file when the `TarFS`
     is closed. The compression is set from the new file name but may be
     set manually with the ``compression`` argument.
 
@@ -100,8 +100,9 @@ class TarFS(WrapFS):
             use default (`False`) to read an existing tar file.
         compression (str, optional): Compression to use (one of the formats
             supported by `tarfile`: ``xz``, ``gz``, ``bz2``, or `None`).
-        temp_fs (str): An FS URL for the temporary filesystem
-            used to store data prior to tarring.
+        temp_fs (str): An FS URL or an FS instance to use to store
+            data prior to tarring. Defaults to creating a new
+            `~fs.tempfs.TempFS`.
 
     """
 
@@ -118,7 +119,7 @@ class TarFS(WrapFS):
         write=False,  # type: bool
         compression=None,  # type: Optional[Text]
         encoding="utf-8",  # type: Text
-        temp_fs="temp://__tartemp__",  # type: Text
+        temp_fs="temp://__tartemp__",  # type: Union[Text, FS]
     ):
         # type: (...) -> FS
         if isinstance(file, (six.text_type, six.binary_type)):
@@ -150,23 +151,22 @@ class TarFS(WrapFS):
             compression=None,  # type: Optional[Text]
             encoding="utf-8",  # type: Text
             temp_fs="temp://__tartemp__",  # type: Text
-        ):
+        ):  # noqa: D107
             # type: (...) -> None
             pass
 
 
 @six.python_2_unicode_compatible
 class WriteTarFS(WrapFS):
-    """A writable tar file.
-    """
+    """A writable tar file."""
 
     def __init__(
         self,
         file,  # type: Union[Text, BinaryIO]
         compression=None,  # type: Optional[Text]
         encoding="utf-8",  # type: Text
-        temp_fs="temp://__tartemp__",  # type: Text
-    ):
+        temp_fs="temp://__tartemp__",  # type: Union[Text, FS]
+    ):  # noqa: D107
         # type: (...) -> None
         self._file = file  # type: Union[Text, BinaryIO]
         self.compression = compression
@@ -222,6 +222,7 @@ class WriteTarFS(WrapFS):
 
         Note:
             This is called automatically when the TarFS is closed.
+
         """
         if not self.isclosed():
             write_tar(
@@ -234,8 +235,7 @@ class WriteTarFS(WrapFS):
 
 @six.python_2_unicode_compatible
 class ReadTarFS(FS):
-    """A readable tar file.
-    """
+    """A readable tar file."""
 
     _meta = {
         "case_insensitive": True,
@@ -260,7 +260,7 @@ class ReadTarFS(FS):
     }
 
     @errors.CreateFailed.catch_all
-    def __init__(self, file, encoding="utf-8"):
+    def __init__(self, file, encoding="utf-8"):  # noqa: D107
         # type: (Union[Text, BinaryIO], Text) -> None
         super(ReadTarFS, self).__init__()
         self._file = file

@@ -2,37 +2,27 @@
 """`Registry` class mapping protocols and FS URLs to their `Opener`.
 """
 
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, print_function, unicode_literals
+
+import typing
 
 import collections
 import contextlib
-import typing
-
 import pkg_resources
 
+from ..errors import ResourceReadOnly
 from .base import Opener
-from .errors import UnsupportedProtocol, EntryPointError
+from .errors import EntryPointError, UnsupportedProtocol
 from .parse import parse_fs_url
 
 if typing.TYPE_CHECKING:
-    from typing import (
-        Callable,
-        Dict,
-        Iterator,
-        List,
-        Text,
-        Type,
-        Tuple,
-        Union,
-    )
+    from typing import Callable, Dict, Iterator, List, Text, Tuple, Type, Union
+
     from ..base import FS
 
 
 class Registry(object):
-    """A registry for `Opener` instances.
-    """
+    """A registry for `Opener` instances."""
 
     def __init__(self, default_opener="osfs", load_extern=False):
         # type: (Text, bool) -> None
@@ -64,10 +54,12 @@ class Registry(object):
 
         Note:
             May be used as a class decorator. For example::
+
                 registry = Registry()
                 @registry.install
                 class ArchiveOpener(Opener):
                     protocols = ['zip', 'tar']
+
         """
         _opener = opener if isinstance(opener, Opener) else opener()
         assert isinstance(_opener, Opener), "Opener instance required"
@@ -79,9 +71,7 @@ class Registry(object):
     @property
     def protocols(self):
         # type: () -> List[Text]
-        """`list`: the list of supported protocols.
-        """
-
+        """`list`: the list of supported protocols."""
         _protocols = list(self._protocols)
         if self.load_extern:
             _protocols.extend(
@@ -199,7 +189,8 @@ class Registry(object):
         """Open a filesystem from a FS URL (ignoring the path component).
 
         Arguments:
-            fs_url (str): A filesystem URL.
+            fs_url (str): A filesystem URL. If a filesystem instance is
+                given instead, it will be returned transparently.
             writeable (bool, optional): `True` if the filesystem must
                 be writeable.
             create (bool, optional): `True` if the filesystem should be
@@ -211,6 +202,14 @@ class Registry(object):
 
         Returns:
             ~fs.base.FS: A filesystem instance.
+
+        Caution:
+            The ``writeable`` parameter only controls whether the
+            filesystem *needs* to be writable, which is relevant for
+            some archive filesystems. Passing ``writeable=False`` will
+            **not** make the return filesystem read-only. For this,
+            consider using `fs.wrap.read_only` to wrap the returned
+            instance.
 
         """
         from ..base import FS
@@ -252,10 +251,13 @@ class Registry(object):
         required logic for that.
 
         Example:
-            >>> def print_ls(list_fs):
-            ...     '''List a directory.'''
-            ...     with manage_fs(list_fs) as fs:
-            ...         print(' '.join(fs.listdir()))
+            The `~Registry.manage_fs` method can be used to define a small
+            utility function::
+
+                >>> def print_ls(list_fs):
+                ...     '''List a directory.'''
+                ...     with manage_fs(list_fs) as fs:
+                ...         print(' '.join(fs.listdir()))
 
             This function may be used in two ways. You may either pass
             a ``str``, as follows::
@@ -271,10 +273,18 @@ class Registry(object):
         """
         from ..base import FS
 
+        def assert_writeable(fs):
+            if fs.getmeta().get("read_only", True):
+                raise ResourceReadOnly(path="/")
+
         if isinstance(fs_url, FS):
+            if writeable:
+                assert_writeable(fs_url)
             yield fs_url
         else:
             _fs = self.open_fs(fs_url, create=create, writeable=writeable, cwd=cwd)
+            if writeable:
+                assert_writeable(_fs)
             try:
                 yield _fs
             finally:

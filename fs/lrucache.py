@@ -1,12 +1,11 @@
 """Least Recently Used cache mapping.
 """
 
-from __future__ import absolute_import
-from __future__ import unicode_literals
+from __future__ import absolute_import, unicode_literals
 
 import typing
-from collections import OrderedDict
 
+from collections import OrderedDict
 
 _K = typing.TypeVar("_K")
 _V = typing.TypeVar("_V")
@@ -22,13 +21,13 @@ class LRUCache(OrderedDict, typing.Generic[_K, _V]):
 
     def __init__(self, cache_size):
         # type: (int) -> None
+        """Create a new LRUCache with the given size."""
         self.cache_size = cache_size
         super(LRUCache, self).__init__()
 
     def __setitem__(self, key, value):
         # type: (_K, _V) -> None
-        """Store a new views, potentially discarding an old value.
-        """
+        """Store a new views, potentially discarding an old value."""
         if key not in self:
             if len(self) >= self.cache_size:
                 self.popitem(last=False)
@@ -36,8 +35,7 @@ class LRUCache(OrderedDict, typing.Generic[_K, _V]):
 
     def __getitem__(self, key):
         # type: (_K) -> _V
-        """Get the item, but also makes it most recent.
-        """
+        """Get the item, but also makes it most recent."""
         _super = typing.cast(OrderedDict, super(LRUCache, self))
         value = _super.__getitem__(key)
         _super.__delitem__(key)
