@@ -1,21 +1,21 @@
 # coding: utf-8
 from __future__ import unicode_literals
 
+import sys
+
 import errno
 import io
 import os
 import shutil
 import tempfile
-import sys
+import time
 import unittest
-import pytest
-
-from fs import osfs, open_fs
-from fs.path import relpath, dirname
-from fs import errors
-from fs.test import FSTestCases
-
+import warnings
 from six import text_type
+
+from fs import errors, open_fs, osfs
+from fs.path import dirname, relpath
+from fs.test import FSTestCases
 
 try:
     from unittest import mock
@@ -25,6 +25,14 @@ except ImportError:
 
 class TestOSFS(FSTestCases, unittest.TestCase):
     """Test OSFS implementation."""
+
+    @classmethod
+    def setUpClass(cls):
+        warnings.simplefilter("error")
+
+    @classmethod
+    def tearDownClass(cls):
+        warnings.simplefilter(warnings.defaultaction)
 
     def make_fs(self):
         temp_dir = tempfile.mkdtemp("fstestosfs")
@@ -88,10 +96,27 @@ class TestOSFS(FSTestCases, unittest.TestCase):
         self.assertIn("TYRIONLANISTER", fs1.getsyspath("/"))
         self.assertNotIn("TYRIONLANISTER", fs2.getsyspath("/"))
 
-    @pytest.mark.skipif(osfs.sendfile is None, reason="sendfile not supported")
-    @pytest.mark.skipif(
+    def test_copy_preserve_time(self):
+        self.fs.makedir("foo")
+        self.fs.makedir("bar")
+        self.fs.create("foo/file.txt")
+        raw_info = {"details": {"modified": time.time() - 10000}}
+        self.fs.setinfo("foo/file.txt", raw_info)
+
+        namespaces = ("details", "modified")
+        src_info = self.fs.getinfo("foo/file.txt", namespaces)
+
+        self.fs.copy("foo/file.txt", "bar/file.txt", preserve_time=True)
+        self.assertTrue(self.fs.exists("bar/file.txt"))
+
+        dst_info = self.fs.getinfo("bar/file.txt", namespaces)
+        delta = dst_info.modified - src_info.modified
+        self.assertAlmostEqual(delta.total_seconds(), 0, places=2)
+
+    @unittest.skipUnless(osfs.sendfile, "sendfile not supported")
+    @unittest.skipIf(
         sys.version_info >= (3, 8),
-        reason="the copy function uses sendfile in Python 3.8+, "
+        "the copy function uses sendfile in Python 3.8+, "
         "making the patched implementation irrelevant",
     )
     def test_copy_sendfile(self):
@@ -139,7 +164,7 @@ class TestOSFS(FSTestCases, unittest.TestCase):
         finally:
             shutil.rmtree(dir_path)
 
-    @pytest.mark.skipif(not hasattr(os, "symlink"), reason="No symlink support")
+    @unittest.skipUnless(hasattr(os, "symlink"), "No symlink support")
     def test_symlinks(self):
         with open(self._get_real_path("foo"), "wb") as f:
             f.write(b"foobar")

@@ -1,27 +1,25 @@
 """Manage a volatile in-memory filesystem.
 """
-from __future__ import absolute_import
-from __future__ import unicode_literals
+from __future__ import absolute_import, unicode_literals
+
+import typing
 
 import contextlib
 import io
 import os
+import six
 import time
-import typing
 from collections import OrderedDict
 from threading import RLock
 
-import six
-
 from . import errors
+from ._typing import overload
 from .base import FS
+from .copy import copy_modified_time
 from .enums import ResourceType, Seek
 from .info import Info
 from .mode import Mode
-from .path import iteratepath
-from .path import normpath
-from .path import split
-from ._typing import overload
+from .path import iteratepath, normpath, split
 
 if typing.TYPE_CHECKING:
     from typing import (
@@ -29,13 +27,19 @@ if typing.TYPE_CHECKING:
         BinaryIO,
         Collection,
         Dict,
+        Iterable,
         Iterator,
         List,
         Optional,
         SupportsInt,
-        Union,
         Text,
+        Tuple,
+        Union,
     )
+
+    import array
+    import mmap
+
     from .base import _OpendirFactory
     from .info import RawInfo
     from .permissions import Permissions
@@ -90,14 +94,12 @@ class _MemoryFile(io.RawIOBase):
 
     def on_modify(self):  # noqa: D401
         # type: () -> None
-        """Called when file data is modified.
-        """
+        """Called when file data is modified."""
         self._dir_entry.modified_time = self.modified_time = time.time()
 
     def on_access(self):  # noqa: D401
         # type: () -> None
-        """Called when file is accessed.
-        """
+        """Called when file is accessed."""
         self._dir_entry.accessed_time = self.accessed_time = time.time()
 
     def flush(self):
@@ -118,8 +120,8 @@ class _MemoryFile(io.RawIOBase):
 
     __next__ = next
 
-    def readline(self, size=-1):
-        # type: (int) -> bytes
+    def readline(self, size=None):
+        # type: (Optional[int]) -> bytes
         if not self._mode.reading:
             raise IOError("File not open for reading")
         with self._seek_lock():
@@ -133,7 +135,7 @@ class _MemoryFile(io.RawIOBase):
                 self._dir_entry.remove_open_file(self)
                 super(_MemoryFile, self).close()
 
-    def read(self, size=-1):
+    def read(self, size=None):
         # type: (Optional[int]) -> bytes
         if not self._mode.reading:
             raise IOError("File not open for reading")
@@ -192,17 +194,15 @@ class _MemoryFile(io.RawIOBase):
         return self._mode.writing
 
     def write(self, data):
-        # type: (bytes) -> int
+        # type: (Union[bytes, memoryview, array.array[Any], mmap.mmap]) -> int
         if not self._mode.writing:
             raise IOError("File not open for writing")
         with self._seek_lock():
             self.on_modify()
             return self._bytes_io.write(data)
 
-    def writelines(self, sequence):  # type: ignore
-        # type: (List[bytes]) -> None
-        # FIXME(@althonos): For some reason the stub for IOBase.writelines
-        #      is List[Any] ?! It should probably be Iterable[ByteString]
+    def writelines(self, sequence):
+        # type: (Iterable[Union[bytes, memoryview, array.array[Any], mmap.mmap]]) -> None  # noqa: E501
         with self._seek_lock():
             self.on_modify()
             self._bytes_io.writelines(sequence)
@@ -247,18 +247,18 @@ class _DirEntry(object):
                 _bytes_file.seek(0, os.SEEK_END)
                 return _bytes_file.tell()
 
-    @overload  # noqa: F811
-    def get_entry(self, name, default):
+    @overload
+    def get_entry(self, name, default):  # noqa: F811
         # type: (Text, _DirEntry) -> _DirEntry
         pass
 
-    @overload  # noqa: F811
-    def get_entry(self, name):
+    @overload
+    def get_entry(self, name):  # noqa: F811
         # type: (Text) -> Optional[_DirEntry]
         pass
 
-    @overload  # noqa: F811
-    def get_entry(self, name, default):
+    @overload
+    def get_entry(self, name, default):  # noqa: F811
         # type: (Text, None) -> Optional[_DirEntry]
         pass
 
@@ -274,6 +274,10 @@ class _DirEntry(object):
     def remove_entry(self, name):
         # type: (Text) -> None
         del self._dir[name]
+
+    def clear(self):
+        # type: () -> None
+        self._dir.clear()
 
     def __contains__(self, name):
         # type: (object) -> bool
@@ -295,6 +299,21 @@ class _DirEntry(object):
         # type: (_MemoryFile) -> None
         self._open_files.remove(memory_file)
 
+    def to_info(self, namespaces=None):
+        # type: (Optional[Collection[Text]]) -> Info
+        namespaces = namespaces or ()
+        info = {"basic": {"name": self.name, "is_dir": self.is_dir}}
+        if "details" in namespaces:
+            info["details"] = {
+                "_write": ["accessed", "modified"],
+                "type": int(self.resource_type),
+                "size": self.size,
+                "accessed": self.accessed_time,
+                "modified": self.modified_time,
+                "created": self.created_time,
+            }
+        return Info(info)
+
 
 @six.python_2_unicode_compatible
 class MemoryFS(FS):
@@ -305,12 +324,16 @@ class MemoryFS(FS):
     fast, but non-permanent. The `MemoryFS` constructor takes no
     arguments.
 
-    Example:
-        >>> mem_fs = MemoryFS()
+    Examples:
+        Create with the constructor::
 
-    Or via an FS URL:
-        >>> import fs
-        >>> mem_fs = fs.open_fs('mem://')
+            >>> from fs.memoryfs import MemoryFS
+            >>> mem_fs = MemoryFS()
+
+        Or via an FS URL::
+
+            >>> import fs
+            >>> mem_fs = fs.open_fs('mem://')
 
     """
 
@@ -326,8 +349,7 @@ class MemoryFS(FS):
 
     def __init__(self):
         # type: () -> None
-        """Create an in-memory filesystem.
-        """
+        """Create an in-memory filesystem."""
         self._meta = self._meta.copy()
         self.root = self._make_dir_entry(ResourceType.directory, "")
         super(MemoryFS, self).__init__()
@@ -346,8 +368,7 @@ class MemoryFS(FS):
 
     def _get_dir_entry(self, dir_path):
         # type: (Text) -> Optional[_DirEntry]
-        """Get a directory entry, or `None` if one doesn't exist.
-        """
+        """Get a directory entry, or `None` if one doesn't exist."""
         with self._lock:
             dir_path = normpath(dir_path)
             current_entry = self.root  # type: Optional[_DirEntry]
@@ -367,33 +388,24 @@ class MemoryFS(FS):
 
     def getinfo(self, path, namespaces=None):
         # type: (Text, Optional[Collection[Text]]) -> Info
-        namespaces = namespaces or ()
         _path = self.validatepath(path)
         dir_entry = self._get_dir_entry(_path)
         if dir_entry is None:
             raise errors.ResourceNotFound(path)
-        info = {"basic": {"name": dir_entry.name, "is_dir": dir_entry.is_dir}}
-        if "details" in namespaces:
-            info["details"] = {
-                "_write": ["accessed", "modified"],
-                "type": int(dir_entry.resource_type),
-                "size": dir_entry.size,
-                "accessed": dir_entry.accessed_time,
-                "modified": dir_entry.modified_time,
-                "created": dir_entry.created_time,
-            }
-        return Info(info)
+        return dir_entry.to_info(namespaces=namespaces)
 
     def listdir(self, path):
         # type: (Text) -> List[Text]
         self.check()
         _path = self.validatepath(path)
         with self._lock:
+            # locate and validate the entry corresponding to the given path
             dir_entry = self._get_dir_entry(_path)
             if dir_entry is None:
                 raise errors.ResourceNotFound(path)
             if not dir_entry.is_dir:
                 raise errors.DirectoryExpected(path)
+            # return the filenames in the order they were created
             return dir_entry.list()
 
     if typing.TYPE_CHECKING:
@@ -431,6 +443,59 @@ class MemoryFS(FS):
                 new_dir = self._make_dir_entry(ResourceType.directory, dir_name)
                 parent_dir.set_entry(dir_name, new_dir)
             return self.opendir(path)
+
+    def move(self, src_path, dst_path, overwrite=False, preserve_time=False):
+        src_dir, src_name = split(self.validatepath(src_path))
+        dst_dir, dst_name = split(self.validatepath(dst_path))
+
+        with self._lock:
+            src_dir_entry = self._get_dir_entry(src_dir)
+            if src_dir_entry is None or src_name not in src_dir_entry:
+                raise errors.ResourceNotFound(src_path)
+            src_entry = src_dir_entry.get_entry(src_name)
+            if src_entry.is_dir:
+                raise errors.FileExpected(src_path)
+
+            dst_dir_entry = self._get_dir_entry(dst_dir)
+            if dst_dir_entry is None:
+                raise errors.ResourceNotFound(dst_path)
+            elif not overwrite and dst_name in dst_dir_entry:
+                raise errors.DestinationExists(dst_path)
+
+            # move the entry from the src folder to the dst folder
+            dst_dir_entry.set_entry(dst_name, src_entry)
+            src_dir_entry.remove_entry(src_name)
+            # make sure to update the entry name itself (see #509)
+            src_entry.name = dst_name
+
+            if preserve_time:
+                copy_modified_time(self, src_path, self, dst_path)
+
+    def movedir(self, src_path, dst_path, create=False, preserve_time=False):
+        src_dir, src_name = split(self.validatepath(src_path))
+        dst_dir, dst_name = split(self.validatepath(dst_path))
+
+        with self._lock:
+            src_dir_entry = self._get_dir_entry(src_dir)
+            if src_dir_entry is None or src_name not in src_dir_entry:
+                raise errors.ResourceNotFound(src_path)
+            src_entry = src_dir_entry.get_entry(src_name)
+            if not src_entry.is_dir:
+                raise errors.DirectoryExpected(src_path)
+
+            # move the entry from the src folder to the dst folder
+            dst_dir_entry = self._get_dir_entry(dst_dir)
+            if dst_dir_entry is None or (not create and dst_name not in dst_dir_entry):
+                raise errors.ResourceNotFound(dst_path)
+
+            # move the entry from the src folder to the dst folder
+            dst_dir_entry.set_entry(dst_name, src_entry)
+            src_dir_entry.remove_entry(src_name)
+            # make sure to update the entry name itself (see #509)
+            src_entry.name = dst_name
+
+            if preserve_time:
+                copy_modified_time(self, src_path, self, dst_path)
 
     def openbin(self, path, mode="r", buffering=-1, **options):
         # type: (Text, Text, int, **Any) -> BinaryIO
@@ -498,12 +563,29 @@ class MemoryFS(FS):
 
     def removedir(self, path):
         # type: (Text) -> None
+        # make sure we are not removing root
         _path = self.validatepath(path)
-
         if _path == "/":
             raise errors.RemoveRootError()
+        # make sure the directory is empty
+        if not self.isempty(path):
+            raise errors.DirectoryNotEmpty(path)
+        # we can now delegate to removetree since we confirmed that
+        # * path exists (isempty)
+        # * path is a folder (isempty)
+        # * path is not root
+        self.removetree(_path)
+
+    def removetree(self, path):
+        # type: (Text) -> None
+        _path = self.validatepath(path)
 
         with self._lock:
+
+            if _path == "/":
+                self.root.clear()
+                return
+
             dir_path, file_name = split(_path)
             parent_dir_entry = self._get_dir_entry(dir_path)
 
@@ -514,10 +596,33 @@ class MemoryFS(FS):
             if not dir_dir_entry.is_dir:
                 raise errors.DirectoryExpected(path)
 
-            if len(dir_dir_entry):
-                raise errors.DirectoryNotEmpty(path)
-
             parent_dir_entry.remove_entry(file_name)
+
+    def scandir(
+        self,
+        path,  # type: Text
+        namespaces=None,  # type: Optional[Collection[Text]]
+        page=None,  # type: Optional[Tuple[int, int]]
+    ):
+        # type: (...) -> Iterator[Info]
+        self.check()
+        _path = self.validatepath(path)
+        with self._lock:
+            # locate and validate the entry corresponding to the given path
+            dir_entry = self._get_dir_entry(_path)
+            if dir_entry is None:
+                raise errors.ResourceNotFound(path)
+            if not dir_entry.is_dir:
+                raise errors.DirectoryExpected(path)
+            # if paging was requested, slice the filenames
+            filenames = dir_entry.list()
+            if page is not None:
+                start, end = page
+                filenames = filenames[start:end]
+            # yield info with the right namespaces
+            for name in filenames:
+                entry = typing.cast(_DirEntry, dir_entry.get_entry(name))
+                yield entry.to_info(namespaces=namespaces)
 
     def setinfo(self, path, info):
         # type: (Text, RawInfo) -> None

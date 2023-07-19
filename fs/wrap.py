@@ -2,45 +2,45 @@
 
 Here's an example that opens a filesystem then makes it *read only*::
 
-    >>> from fs import open_fs
-    >>> from fs.wrap import read_only
-    >>> projects_fs = open_fs('~/projects')
-    >>> read_only_projects_fs = read_only(projects_fs)
-    >>> read_only_projects_fs.remove('__init__.py')
+    >>> home_fs = fs.open_fs('~')
+    >>> read_only_home_fs = fs.wrap.read_only(home_fs)
+    >>> read_only_home_fs.removedir('Desktop')
     Traceback (most recent call last):
       ...
-    fs.errors.ResourceReadOnly: resource '__init__.py' is read only
+    fs.errors.ResourceReadOnly: resource 'Desktop' is read only
 
 """
 
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import print_function, unicode_literals
 
 import typing
 
-from .wrapfs import WrapFS
-from .path import abspath, normpath, split
-from .errors import ResourceReadOnly, ResourceNotFound
+from .errors import ResourceNotFound, ResourceReadOnly
 from .info import Info
 from .mode import check_writable
+from .path import abspath, normpath, split
+from .wrapfs import WrapFS
 
 if typing.TYPE_CHECKING:
-    from datetime import datetime
     from typing import (
+        IO,
         Any,
         BinaryIO,
         Collection,
         Dict,
         Iterator,
-        IO,
+        Mapping,
         Optional,
         Text,
         Tuple,
     )
+
+    from datetime import datetime
+
     from .base import FS  # noqa: F401
     from .info import RawInfo
-    from .subfs import SubFS
     from .permissions import Permissions
+    from .subfs import SubFS
 
 
 _W = typing.TypeVar("_W", bound="WrapFS")
@@ -92,9 +92,25 @@ class WrapCachedDir(WrapFS[_F], typing.Generic[_F]):
 
     """
 
+    # FIXME (@althonos): The caching data structure can very likely be
+    # improved. With the current implementation, if `scandir` result was
+    # cached for `namespaces=["details", "access"]`, calling `scandir`
+    # again only with `names=["details"]` will miss the cache, even though
+    # we are already storing the totality of the required metadata.
+    #
+    # A possible solution would be to replaced the cached with a
+    #     Dict[Text, Dict[Text, Dict[Text, Info]]]
+    #           ^           ^         ^     ^-- the actual info object
+    #           |           |         \-- the path of the directory entry
+    #           |           \-- the namespace of the info
+    #           \-- the cached directory entry
+    #
+    # Furthermore, `listdir` and `filterdir` calls should be cached as well,
+    # since they can be written as wrappers of `scandir`.
+
     wrap_name = "cached-dir"
 
-    def __init__(self, wrap_fs):
+    def __init__(self, wrap_fs):  # noqa: D107
         # type: (_F) -> None
         super(WrapCachedDir, self).__init__(wrap_fs)
         self._cache = {}  # type: Dict[Tuple[Text, frozenset], Dict[Text, Info]]
@@ -135,13 +151,17 @@ class WrapCachedDir(WrapFS[_F], typing.Generic[_F]):
 
     def isdir(self, path):
         # type: (Text) -> bool
-        # FIXME(@althonos): this raises an error on non-existing file !
-        return self.getinfo(path).is_dir
+        try:
+            return self.getinfo(path).is_dir
+        except ResourceNotFound:
+            return False
 
     def isfile(self, path):
         # type: (Text) -> bool
-        # FIXME(@althonos): this raises an error on non-existing file !
-        return not self.getinfo(path).is_dir
+        try:
+            return not self.getinfo(path).is_dir
+        except ResourceNotFound:
+            return False
 
 
 class WrapReadOnly(WrapFS[_F], typing.Generic[_F]):
@@ -181,8 +201,8 @@ class WrapReadOnly(WrapFS[_F], typing.Generic[_F]):
         self.check()
         raise ResourceReadOnly(path)
 
-    def move(self, src_path, dst_path, overwrite=False):
-        # type: (Text, Text, bool) -> None
+    def move(self, src_path, dst_path, overwrite=False, preserve_time=False):
+        # type: (Text, Text, bool, bool) -> None
         self.check()
         raise ResourceReadOnly(dst_path)
 
@@ -199,6 +219,11 @@ class WrapReadOnly(WrapFS[_F], typing.Generic[_F]):
         raise ResourceReadOnly(path)
 
     def removedir(self, path):
+        # type: (Text) -> None
+        self.check()
+        raise ResourceReadOnly(path)
+
+    def removetree(self, path):
         # type: (Text) -> None
         self.check()
         raise ResourceReadOnly(path)
@@ -225,8 +250,8 @@ class WrapReadOnly(WrapFS[_F], typing.Generic[_F]):
         self.check()
         raise ResourceReadOnly(path)
 
-    def copy(self, src_path, dst_path, overwrite=False):
-        # type: (Text, Text, bool) -> None
+    def copy(self, src_path, dst_path, overwrite=False, preserve_time=False):
+        # type: (Text, Text, bool, bool) -> None
         self.check()
         raise ResourceReadOnly(dst_path)
 
@@ -297,3 +322,10 @@ class WrapReadOnly(WrapFS[_F], typing.Generic[_F]):
         # type: (Text) -> None
         self.check()
         raise ResourceReadOnly(path)
+
+    def getmeta(self, namespace="standard"):
+        # type: (Text) -> Mapping[Text, object]
+        self.check()
+        meta = dict(self.delegate_fs().getmeta(namespace=namespace))
+        meta.update(read_only=True, supports_rename=False)
+        return meta

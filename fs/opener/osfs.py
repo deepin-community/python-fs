@@ -2,9 +2,7 @@
 """`OSFS` opener definition.
 """
 
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, print_function, unicode_literals
 
 import typing
 
@@ -13,14 +11,14 @@ from .registry import registry
 
 if typing.TYPE_CHECKING:
     from typing import Text
-    from .parse import ParseResult
+
     from ..osfs import OSFS  # noqa: F401
+    from .parse import ParseResult
 
 
 @registry.install
 class OSFSOpener(Opener):
-    """`OSFS` opener.
-    """
+    """`OSFS` opener."""
 
     protocols = ["file", "osfs"]
 
@@ -33,8 +31,9 @@ class OSFSOpener(Opener):
         cwd,  # type: Text
     ):
         # type: (...) -> OSFS
+        from os.path import abspath, expanduser, join, normpath
+
         from ..osfs import OSFS
-        from os.path import abspath, expanduser, normpath, join
 
         _path = abspath(join(cwd, expanduser(parse_result.resource)))
         path = normpath(_path)

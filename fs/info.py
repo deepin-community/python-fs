@@ -1,26 +1,25 @@
 """Container for filesystem resource informations.
 """
 
-from __future__ import absolute_import
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import absolute_import, print_function, unicode_literals
 
 import typing
 from typing import cast
-from copy import deepcopy
 
 import six
+from copy import deepcopy
 
-from .path import join
+from ._typing import Text, overload
 from .enums import ResourceType
 from .errors import MissingInfoNamespace
+from .path import join
 from .permissions import Permissions
 from .time import epoch_to_datetime
-from ._typing import overload, Text
 
 if typing.TYPE_CHECKING:
-    from datetime import datetime
     from typing import Any, Callable, List, Mapping, Optional, Union
+
+    from datetime import datetime
 
     RawInfo = Mapping[Text, Mapping[Text, object]]
     ToDatetime = Callable[[int], datetime]
@@ -41,7 +40,7 @@ class Info(object):
         raw_info (dict): A dict containing resource info.
         to_datetime (callable): A callable that converts an
             epoch time to a datetime object. The default uses
-            :func:`~fs.time.epoch_to_datetime`.
+            `~fs.time.epoch_to_datetime`.
 
     """
 
@@ -49,8 +48,7 @@ class Info(object):
 
     def __init__(self, raw_info, to_datetime=epoch_to_datetime):
         # type: (RawInfo, ToDatetime) -> None
-        """Create a resource info object from a raw info dict.
-        """
+        """Create a resource info object from a raw info dict."""
         self.raw = raw_info
         self._to_datetime = to_datetime
         self.namespaces = frozenset(self.raw.keys())
@@ -73,8 +71,8 @@ class Info(object):
         # type: (None) -> None
         pass
 
-    @overload  # noqa: F811
-    def _make_datetime(self, t):
+    @overload
+    def _make_datetime(self, t):  # noqa: F811
         # type: (int) -> datetime
         pass
 
@@ -91,7 +89,7 @@ class Info(object):
         pass
 
     @overload  # noqa: F811
-    def get(self, namespace, key, default):
+    def get(self, namespace, key, default):  # noqa: F811
         # type: (Text, Text, T) -> Union[Any, T]
         pass
 
@@ -107,8 +105,9 @@ class Info(object):
                 is not found.
 
         Example:
-            >>> info.get('access', 'permissions')
-            ['u_r', 'u_w', '_wx']
+            >>> info = my_fs.getinfo("foo.py", namespaces=["details"])
+            >>> info.get('details', 'type')
+            2
 
         """
         try:
@@ -132,7 +131,11 @@ class Info(object):
         # type: (Text, Text) -> bool
         """Check if a given key in a namespace is writable.
 
-        Uses `~fs.base.FS.setinfo`.
+        When creating an `Info` object, you can add a ``_write`` key to
+        each raw namespace that lists which keys are writable or not.
+
+        In general, this means they are compatible with the `setinfo`
+        function of filesystem objects.
 
         Arguments:
             namespace (str): A namespace identifier.
@@ -140,6 +143,24 @@ class Info(object):
 
         Returns:
             bool: `True` if the key can be modified, `False` otherwise.
+
+        Example:
+            Create an `Info` object that marks only the ``modified`` key
+            as writable in the ``details`` namespace::
+
+                >>> now = time.time()
+                >>> info = Info({
+                ...     "basic": {"name": "foo", "is_dir": False},
+                ...     "details": {
+                ...         "modified": now,
+                ...         "created": now,
+                ...         "_write": ["modified"],
+                ...     }
+                ... })
+                >>> info.is_writeable("details", "created")
+                False
+                >>> info.is_writeable("details", "modified")
+                True
 
         """
         _writeable = self.get(namespace, "_write", ())
@@ -160,8 +181,7 @@ class Info(object):
 
     def copy(self, to_datetime=None):
         # type: (Optional[ToDatetime]) -> Info
-        """Create a copy of this resource info object.
-        """
+        """Create a copy of this resource info object."""
         return Info(deepcopy(self.raw), to_datetime=to_datetime or self._to_datetime)
 
     def make_path(self, dir_path):
@@ -180,21 +200,24 @@ class Info(object):
     @property
     def name(self):
         # type: () -> Text
-        """`str`: the resource name.
-        """
+        """`str`: the resource name."""
         return cast(Text, self.get("basic", "name"))
 
     @property
     def suffix(self):
         # type: () -> Text
-        """`str`: the last component of the name (including dot), or an
-        empty string if there is no suffix.
+        """`str`: the last component of the name (with dot).
+
+        In case there is no suffix, an empty string is returned.
 
         Example:
-            >>> info
-            <info 'foo.py'>
+            >>> info = my_fs.getinfo("foo.py")
             >>> info.suffix
             '.py'
+            >>> info2 = my_fs.getinfo("bar")
+            >>> info2.suffix
+            ''
+
         """
         name = self.get("basic", "name")
         if name.startswith(".") and name.count(".") == 1:
@@ -208,10 +231,10 @@ class Info(object):
         """`List`: a list of any suffixes in the name.
 
         Example:
-            >>> info
-            <info 'foo.tar.gz'>
+            >>> info = my_fs.getinfo("foo.tar.gz")
             >>> info.suffixes
             ['.tar', '.gz']
+
         """
         name = self.get("basic", "name")
         if name.startswith(".") and name.count(".") == 1:
@@ -224,8 +247,7 @@ class Info(object):
         """`str`: the name minus any suffixes.
 
         Example:
-            >>> info
-            <info 'foo.tar.gz'>
+            >>> info = my_fs.getinfo("foo.tar.gz")
             >>> info.stem
             'foo'
 
@@ -238,22 +260,19 @@ class Info(object):
     @property
     def is_dir(self):
         # type: () -> bool
-        """`bool`: `True` if the resource references a directory.
-        """
+        """`bool`: `True` if the resource references a directory."""
         return cast(bool, self.get("basic", "is_dir"))
 
     @property
     def is_file(self):
         # type: () -> bool
-        """`bool`: `True` if the resource references a file.
-        """
+        """`bool`: `True` if the resource references a file."""
         return not cast(bool, self.get("basic", "is_dir"))
 
     @property
     def is_link(self):
         # type: () -> bool
-        """`bool`: `True` if the resource is a symlink.
-        """
+        """`bool`: `True` if the resource is a symlink."""
         self._require_namespace("link")
         return self.get("link", "target", None) is not None
 

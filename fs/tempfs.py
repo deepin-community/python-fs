@@ -9,14 +9,13 @@ that you can later copy. It can also be used as a temporary data store.
 
 """
 
-from __future__ import print_function
-from __future__ import unicode_literals
+from __future__ import print_function, unicode_literals
 
-import shutil
-import tempfile
 import typing
 
+import shutil
 import six
+import tempfile
 
 from . import errors
 from .osfs import OSFS
@@ -29,16 +28,27 @@ if typing.TYPE_CHECKING:
 class TempFS(OSFS):
     """A temporary filesystem on the OS.
 
-    Arguments:
-        identifier (str): A string to distinguish the directory within
-            the OS temp location, used as part of the directory name.
-        temp_dir (str, optional): An OS path to your temp directory
-            (leave as `None` to auto-detect)
-        auto_clean (bool): If `True` (the default), the directory
-            contents will be wiped on close.
-        ignore_clean_errors (bool): If `True` (the default), any errors
-            in the clean process will be suppressed. If `False`, they
-            will be raised.
+    Temporary filesystems are created using the `tempfile.mkdtemp`
+    function to obtain a temporary folder in an OS-specific location.
+    You can provide an alternative location with the ``temp_dir``
+    argument of the constructor.
+
+    Examples:
+        Create with the constructor::
+
+            >>> from fs.tempfs import TempFS
+            >>> tmp_fs = TempFS()
+
+        Or via an FS URL::
+
+            >>> import fs
+            >>> tmp_fs = fs.open_fs("temp://")
+
+        Use a specific identifier for the temporary folder to better
+        illustrate its purpose::
+
+            >>> named_tmp_fs = fs.open_fs("temp://local_copy")
+            >>> named_tmp_fs = TempFS(identifier="local_copy")
 
     """
 
@@ -50,6 +60,20 @@ class TempFS(OSFS):
         ignore_clean_errors=True,  # type: bool
     ):
         # type: (...) -> None
+        """Create a new `TempFS` instance.
+
+        Arguments:
+            identifier (str): A string to distinguish the directory within
+                the OS temp location, used as part of the directory name.
+            temp_dir (str, optional): An OS path to your temp directory
+                (leave as `None` to auto-detect).
+            auto_clean (bool): If `True` (the default), the directory
+                contents will be wiped on close.
+            ignore_clean_errors (bool): If `True` (the default), any errors
+                in the clean process will be suppressed. If `False`, they
+                will be raised.
+
+        """
         self.identifier = identifier
         self._auto_clean = auto_clean
         self._ignore_clean_errors = ignore_clean_errors
@@ -70,14 +94,35 @@ class TempFS(OSFS):
 
     def close(self):
         # type: () -> None
+        """Close the filesystem and release any resources.
+
+        It is important to call this method when you have finished
+        working with the filesystem. Some filesystems may not finalize
+        changes until they are closed (archives for example). You may
+        call this method explicitly (it is safe to call close multiple
+        times), or you can use the filesystem as a context manager to
+        automatically close.
+
+        Hint:
+            Depending on the value of ``auto_clean`` passed when creating
+            the `TempFS`, the underlying temporary folder may be removed
+            or not.
+
+        Example:
+            >>> tmp_fs = TempFS(auto_clean=False)
+            >>> syspath = tmp_fs.getsyspath("/")
+            >>> tmp_fs.close()
+            >>> os.path.exists(syspath)
+            True
+
+        """
         if self._auto_clean:
             self.clean()
         super(TempFS, self).close()
 
     def clean(self):
         # type: () -> None
-        """Clean (delete) temporary files created by this filesystem.
-        """
+        """Clean (delete) temporary files created by this filesystem."""
         if self._cleaned:
             return
 

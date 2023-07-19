@@ -2,7 +2,6 @@ from __future__ import unicode_literals
 
 import multiprocessing
 import unittest
-
 from six import text_type
 
 from fs import errors
@@ -30,7 +29,7 @@ class TestErrors(unittest.TestCase):
             [errors.NoURL, "some_path", "some_purpose"],
             [errors.Unsupported],
             [errors.IllegalBackReference, "path"],
-            [errors.MissingInfoNamespace, "path"]
+            [errors.MissingInfoNamespace, "path"],
         ]
         try:
             pool = multiprocessing.Pool(1)

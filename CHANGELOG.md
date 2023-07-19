@@ -5,6 +5,121 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+
+## Unreleased
+
+
+## [2.4.16] - 2022-05-02
+
+### Changed
+
+- Make `fs.zipfs._ZipExtFile` use the seeking mechanism implemented
+  in the Python standard library in Python version 3.7 and later
+  ([#527](https://github.com/PyFilesystem/pyfilesystem2/pull/527)).
+- Mark `fs.zipfs.ReadZipFS` as a case-sensitive filesystem
+  ([#527](https://github.com/PyFilesystem/pyfilesystem2/pull/527)). 
+- Optimized moving files between filesystems with syspaths.
+  ([#523](https://github.com/PyFilesystem/pyfilesystem2/pull/523)).
+- Fixed `fs.move.move_file` to clean up the copy on the destination in case of errors.
+- `fs.opener.manage_fs` with `writeable=True` will now raise a `ResourceReadOnly`
+  exception if the managed filesystem is not writeable.
+- Marked filesystems wrapped with `fs.wrap.WrapReadOnly` as read-only.
+
+
+## [2.4.15] - 2022-02-07
+
+### Changed
+
+- Support more lenient usernames and group names in FTP servers
+  ([#507](https://github.com/PyFilesystem/pyfilesystem2/pull/507)).
+  Closes [#506](https://github.com/PyFilesystem/pyfilesystem2/issues/506).
+- Removed dependency on pytz ([#518](https://github.com/PyFilesystem/pyfilesystem2/pull/518)).
+  Closes [#516](https://github.com/PyFilesystem/pyfilesystem2/issues/518).
+
+### Fixed
+
+- Fixed `MemoryFS.move` and `MemoryFS.movedir` not updating the name of moved
+  resources, causing `MemoryFS.scandir` to use the old name.
+  ([#510](https://github.com/PyFilesystem/pyfilesystem2/pull/510)).
+  Closes [#509](https://github.com/PyFilesystem/pyfilesystem2/issues/509).
+- Make `WrapFS.move` and `WrapFS.movedir` use the delegate FS methods instead
+  of `fs.move` functions, which was causing optimized implementation of 
+  `movedir` to be always skipped.
+  ([#511](https://github.com/PyFilesystem/pyfilesystem2/pull/511)).
+
+
+## [2.4.14] - 2021-11-16
+
+### Added
+
+- Added `fs.copy.copy_file_if`, `fs.copy.copy_dir_if`, and `fs.copy.copy_fs_if`.
+  Closes [#458](https://github.com/PyFilesystem/pyfilesystem2/issues/458).
+- Added `fs.base.FS.getmodified`.
+
+### Changed
+
+- FTP servers that do not support the MLST command now try to use the MDTM command to
+  retrieve the last modification timestamp of a resource.
+  Closes [#456](https://github.com/PyFilesystem/pyfilesystem2/pull/456).
+
+### Fixed
+
+- Fixed performance bugs in `fs.copy.copy_dir_if_newer`. Test cases were adapted to catch those bugs in the future.
+- Fixed precision bug for timestamps in `fs.OSFS.setinfo`.
+
+
+## [2.4.13] - 2021-03-27
+
+### Added
+
+- Added FTP over TLS (FTPS) support to FTPFS.
+  Closes [#437](https://github.com/PyFilesystem/pyfilesystem2/issues/437),
+  [#449](https://github.com/PyFilesystem/pyfilesystem2/pull/449).
+- `PathError` now supports wrapping an exception using the `exc` argument.
+  Closes [#453](https://github.com/PyFilesystem/pyfilesystem2/issues/453).
+- Better documentation of the `writable` parameter of `fs.open_fs`, and
+  hint about using `fs.wrap.read_only` when a read-only filesystem is
+  required. Closes [#441](https://github.com/PyFilesystem/pyfilesystem2/issues/441).
+- Copy and move operations now provide a parameter `preserve_time` that, when
+  passed as `True`, makes sure the "mtime" of the destination file will be
+  the same as that of the source file.
+
+### Changed
+
+- Make `FS.upload` explicit about the expected error when the parent directory of the destination does not exist.
+  Closes [#445](https://github.com/PyFilesystem/pyfilesystem2/pull/445).
+- Migrate continuous integration from Travis-CI to GitHub Actions and introduce several linters
+  again in the build steps ([#448](https://github.com/PyFilesystem/pyfilesystem2/pull/448)).
+  Closes [#446](https://github.com/PyFilesystem/pyfilesystem2/issues/446).
+- Stop requiring `pytest` to run tests, allowing any test runner supporting `unittest`-style
+  test suites.
+- `FSTestCases` now builds the large data required for `upload` and `download` tests only
+  once in order to reduce the total testing time.
+- `MemoryFS.move` and `MemoryFS.movedir` will now avoid copying data.
+  Closes [#452](https://github.com/PyFilesystem/pyfilesystem2/issues/452).
+- `FS.removetree("/")` behaviour has been standardized in all filesystems, and
+  is expected to clear the contents of the root folder without deleting it.
+  Closes [#471](https://github.com/PyFilesystem/pyfilesystem2/issues/471).
+- `FS.getbasic` is now deprecated, as it is redundant with `FS.getinfo`,
+  and `FS.getinfo` is now explicitly expected to return the *basic* info
+  namespace unconditionally. Closes [#469](https://github.com/PyFilesystem/pyfilesystem2/issues/469).
+
+### Fixed
+
+- Make `FTPFile`, `MemoryFile` and `RawWrapper` accept [`array.array`](https://docs.python.org/3/library/array.html)
+  arguments for the `write` and `writelines` methods, as expected by their base class [`io.RawIOBase`](https://docs.python.org/3/library/io.html#io.RawIOBase).
+- Various documentation issues, including `MemoryFS` docstring not rendering properly.
+- Avoid creating a new connection on every call of `FTPFS.upload`. Closes [#455](https://github.com/PyFilesystem/pyfilesystem2/issues/455).
+- `WrapReadOnly.removetree` not raising a `ResourceReadOnly` when called. Closes [#468](https://github.com/PyFilesystem/pyfilesystem2/issues/468).
+- `WrapCachedDir.isdir` and `WrapCachedDir.isfile` raising a `ResourceNotFound` error on non-existing path ([#470](https://github.com/PyFilesystem/pyfilesystem2/pull/470)).
+- `FTPFS` not listing certain entries with sticky/SUID/SGID permissions set by Linux server ([#473](https://github.com/PyFilesystem/pyfilesystem2/pull/473)).
+  Closes [#451](https://github.com/PyFilesystem/pyfilesystem2/issues/451).
+- `scandir` iterator not being closed explicitly in `OSFS.scandir`, occasionally causing a `ResourceWarning`
+  to be thrown. Closes [#311](https://github.com/PyFilesystem/pyfilesystem2/issues/311).
+- Incomplete type annotations for the `temp_fs` parameter of `WriteTarFS` and `WriteZipFS`.
+  Closes [#410](https://github.com/PyFilesystem/pyfilesystem2/issues/410).
+
+
 ## [2.4.12] - 2021-01-14
 
 ### Added
@@ -14,6 +129,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   [#380](https://github.com/PyFilesystem/pyfilesystem2/issues/380).
 - Added compatibility if a Windows FTP server returns file information to the
   `LIST` command with 24-hour times. Closes [#438](https://github.com/PyFilesystem/pyfilesystem2/issues/438).
+- Added Python 3.9 support. Closes [#443](https://github.com/PyFilesystem/pyfilesystem2/issues/443).
 
 ### Changed
 
@@ -22,25 +138,30 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
   be able to see if we break something aside from known issues with FTP tests.
 - Include docs in source distributions as well as the whole tests folder,
   ensuring `conftest.py` is present, fixes [#364](https://github.com/PyFilesystem/pyfilesystem2/issues/364).
-- Stop patching copy with Python 3.8+ because it already uses `sendfile`.
+- Stop patching copy with Python 3.8+ because it already uses `sendfile`
+  ([#424](https://github.com/PyFilesystem/pyfilesystem2/pull/424)).
+  Closes [#421](https://github.com/PyFilesystem/pyfilesystem2/issues/421).
 
 ### Fixed
 
 - Fixed crash when CPython's -OO flag is used
-- Fixed error when parsing timestamps from a FTP directory served from a WindowsNT FTP Server, fixes [#395](https://github.com/PyFilesystem/pyfilesystem2/issues/395).
+- Fixed error when parsing timestamps from a FTP directory served from a WindowsNT FTP Server.
+  Closes [#395](https://github.com/PyFilesystem/pyfilesystem2/issues/395).
 - Fixed documentation of `Mode.to_platform_bin`. Closes [#382](https://github.com/PyFilesystem/pyfilesystem2/issues/382).
 - Fixed the code example in the "Testing Filesystems" section of the
   "Implementing Filesystems" guide. Closes [#407](https://github.com/PyFilesystem/pyfilesystem2/issues/407).
 - Fixed `FTPFS.openbin` not implicitly opening files in binary mode like expected
   from `openbin`. Closes [#406](https://github.com/PyFilesystem/pyfilesystem2/issues/406).
 
+
 ## [2.4.11] - 2019-09-07
 
 ### Added
 
 - Added geturl for TarFS and ZipFS for 'fs' purpose. NoURL for 'download' purpose.
-- Added helpful root path in CreateFailed exception [#340](https://github.com/PyFilesystem/pyfilesystem2/issues/340)
-- Added Python 3.8 support
+- Added helpful root path in CreateFailed exception.
+  Closes [#340](https://github.com/PyFilesystem/pyfilesystem2/issues/340).
+- Added Python 3.8 support.
 
 ### Fixed
 
@@ -68,7 +189,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ### Fixed
 
-- Fixed broken WrapFS.movedir [#322](https://github.com/PyFilesystem/pyfilesystem2/issues/322)
+- Fixed broken WrapFS.movedir [#322](https://github.com/PyFilesystem/pyfilesystem2/issues/322).
 
 ## [2.4.9] - 2019-07-28
 
@@ -450,7 +571,7 @@ No changes, pushed wrong branch to PyPi.
 
 ### Added
 
-- New `copy_if_newer' functionality in`copy` module.
+- New `copy_if_newer` functionality in `copy` module.
 
 ### Fixed
 
@@ -461,17 +582,17 @@ No changes, pushed wrong branch to PyPi.
 ### Changed
 
 - Improved FTP support for non-compliant servers
-- Fix for ZipFS implied directories
+- Fix for `ZipFS` implied directories
 
 ## [2.0.1] - 2017-03-11
 
 ### Added
 
-- TarFS contributed by Martin Larralde
+- `TarFS` contributed by Martin Larralde.
 
 ### Fixed
 
-- FTPFS bugs.
+- `FTPFS` bugs.
 
 ## [2.0.0] - 2016-12-07
 

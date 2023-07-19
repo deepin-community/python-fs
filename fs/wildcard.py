@@ -2,16 +2,17 @@
 """
 # Adapted from https://hg.python.org/cpython/file/2.7/Lib/fnmatch.py
 
-from __future__ import unicode_literals, print_function
+from __future__ import print_function, unicode_literals
+
+import typing
 
 import re
-import typing
 from functools import partial
 
 from .lrucache import LRUCache
 
 if typing.TYPE_CHECKING:
-    from typing import Callable, Iterable, Text, Tuple, Pattern
+    from typing import Callable, Iterable, Pattern, Text, Tuple
 
 
 _PATTERN_CACHE = LRUCache(1000)  # type: LRUCache[Tuple[Text, bool], Pattern]
@@ -32,7 +33,7 @@ def match(pattern, name):
     try:
         re_pat = _PATTERN_CACHE[(pattern, True)]
     except KeyError:
-        res = "(?ms)" + _translate(pattern) + r'\Z'
+        res = "(?ms)" + _translate(pattern) + r"\Z"
         _PATTERN_CACHE[(pattern, True)] = re_pat = re.compile(res)
     return re_pat.match(name) is not None
 
@@ -52,7 +53,7 @@ def imatch(pattern, name):
     try:
         re_pat = _PATTERN_CACHE[(pattern, False)]
     except KeyError:
-        res = "(?ms)" + _translate(pattern, case_sensitive=False) + r'\Z'
+        res = "(?ms)" + _translate(pattern, case_sensitive=False) + r"\Z"
         _PATTERN_CACHE[(pattern, False)] = re_pat = re.compile(res, re.IGNORECASE)
     return re_pat.match(name) is not None
 

@@ -13,9 +13,8 @@
 # serve to show the default.
 
 import sys
+
 import os
-
-
 import sphinx_rtd_theme
 
 html_theme = "sphinx_rtd_theme"
@@ -39,7 +38,8 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.viewcode',
     'sphinx.ext.napoleon',
-    'sphinx.ext.intersphinx'
+    'sphinx.ext.intersphinx',
+    "recommonmark",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -63,7 +63,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'PyFilesystem'
-copyright = u'2016-2017, Will McGugan'
+copyright = u'2016-2021, Will McGugan and the PyFilesystem2 contributors'
 author = u'Will McGugan'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -71,6 +71,7 @@ author = u'Will McGugan'
 # built documents.
 #
 from fs import __version__
+
 # The short X.Y version.
 version = '.'.join(__version__.split('.')[:2])
 # The full version, including alpha/beta/rc tags.
@@ -304,3 +305,14 @@ texinfo_documents = [
 #texinfo_no_detailmenu = False
 
 napoleon_include_special_with_doc = True
+
+
+# -- Options for autodoc -----------------------------------------------------
+
+# Configure autodoc so that it doesn't skip building the documentation for
+# __init__ methods, since the arguments to instantiate classes should be in
+# the __init__ docstring and not at the class-level.
+
+autodoc_default_options = {
+    'special-members': '__init__',
+}
