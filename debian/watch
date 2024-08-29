@@ -1,3 +1,4 @@
 version=4
-https://github.com/PyFilesystem/pyfilesystem2/releases \
-	.*/archive/refs/tags/v?@ANY_VERSION@@ARCHIVE_EXT@
+opts="filenamemangle=s%.*/@ANY_VERSION@%@PACKAGE@-$1.tar.gz%,searchmode=plain" \
+ https://api.github.com/repos/PyFilesystem/pyfilesystem2/tags?per_page=100 \
+ https://api.github.com/repos/PyFilesystem/pyfilesystem2/tarball/refs/tags/@ANY_VERSION@

@@ -1,3 +1,24 @@
+python-fs (2.4.16-4) unstable; urgency=medium
+
+  * Team upload.
+
+  [ Alexandre Detiste ]
+  * remove build-dep python3-mock: import is hybridized.
+  * use new dh-sequence-python3.
+
+  [ Boyuan Yang ]
+  * debian/watch: Fix monitoring script.
+
+ -- Boyuan Yang <byang@debian.org>  Mon, 08 Apr 2024 23:15:47 -0400
+
+python-fs (2.4.16-3) unstable; urgency=medium
+
+  * Team upload.
+  * debian/patches/f6f260f97df29500a531baf1b370c3e4e4f3dc76.patch:
+    Add proposed patch to fix FTBFS with python3.12. (Closes: #1058294)
+
+ -- Boyuan Yang <byang@debian.org>  Sat, 06 Jan 2024 15:37:49 -0500
+
 python-fs (2.4.16-2) unstable; urgency=medium
 
   [ Debian Janitor ]
