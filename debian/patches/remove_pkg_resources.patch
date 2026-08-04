@@ -1,0 +1,162 @@
+--- a/fs/opener/__init__.py
++++ b/fs/opener/__init__.py
+@@ -2,9 +2,6 @@
+ """Open filesystems from a URL.
+ """
+ 
+-# Declare fs.opener as a namespace package
+-__import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+-
+ # Import opener modules so that `registry.install` if called on each opener
+ from . import appfs, ftpfs, memoryfs, osfs, tarfs, tempfs, zipfs
+ 
+--- a/fs/opener/registry.py
++++ b/fs/opener/registry.py
+@@ -8,7 +8,6 @@
+ 
+ import collections
+ import contextlib
+-import pkg_resources
+ 
+ from ..errors import ResourceReadOnly
+ from .base import Opener
+@@ -73,12 +72,6 @@
+         # type: () -> List[Text]
+         """`list`: the list of supported protocols."""
+         _protocols = list(self._protocols)
+-        if self.load_extern:
+-            _protocols.extend(
+-                entry_point.name
+-                for entry_point in pkg_resources.iter_entry_points("fs.opener")
+-            )
+-            _protocols = list(collections.OrderedDict.fromkeys(_protocols))
+         return _protocols
+ 
+     def get_opener(self, protocol):
+@@ -101,11 +94,7 @@
+         """
+         protocol = protocol or self.default_opener
+ 
+-        if self.load_extern:
+-            entry_point = next(
+-                pkg_resources.iter_entry_points("fs.opener", protocol), None
+-            )
+-        else:
++        if True:
+             entry_point = None
+ 
+         # If not entry point was loaded from the extensions, try looking
+--- a/setup.cfg
++++ b/setup.cfg
+@@ -43,7 +43,6 @@
+     setuptools >=38.3.0
+ install_requires =
+     platformdirs~=4.3.6
+-    setuptools
+     enum34 ~=1.1.6      ;  python_version < '3.4'
+     typing ~=3.6        ;  python_version < '3.6'
+     backports.os ~=0.1  ;  python_version < '3.0'
+--- a/tests/test_opener.py
++++ b/tests/test_opener.py
+@@ -3,7 +3,6 @@
+ import sys
+ 
+ import os
+-import pkg_resources
+ import shutil
+ import tempfile
+ import unittest
+@@ -109,69 +108,10 @@
+     def test_protocols(self):
+         self.assertIsInstance(opener.registry.protocols, list)
+ 
+-    def test_registry_protocols(self):
+-        # Check registry.protocols list the names of all available extension
+-        extensions = [
+-            pkg_resources.EntryPoint("proto1", "mod1"),
+-            pkg_resources.EntryPoint("proto2", "mod2"),
+-        ]
+-        m = mock.MagicMock(return_value=extensions)
+-        with mock.patch.object(
+-            sys.modules["pkg_resources"], "iter_entry_points", new=m
+-        ):
+-            self.assertIn("proto1", opener.registry.protocols)
+-            self.assertIn("proto2", opener.registry.protocols)
+-
+     def test_unknown_protocol(self):
+         with self.assertRaises(errors.UnsupportedProtocol):
+             opener.open_fs("unknown://")
+ 
+-    def test_entry_point_load_error(self):
+-
+-        entry_point = mock.MagicMock()
+-        entry_point.load.side_effect = ValueError("some error")
+-
+-        iter_entry_points = mock.MagicMock(return_value=iter([entry_point]))
+-
+-        with mock.patch("pkg_resources.iter_entry_points", iter_entry_points):
+-            with self.assertRaises(errors.EntryPointError) as ctx:
+-                opener.open_fs("test://")
+-            self.assertEqual(
+-                "could not load entry point; some error", str(ctx.exception)
+-            )
+-
+-    def test_entry_point_type_error(self):
+-        class NotAnOpener(object):
+-            pass
+-
+-        entry_point = mock.MagicMock()
+-        entry_point.load = mock.MagicMock(return_value=NotAnOpener)
+-        iter_entry_points = mock.MagicMock(return_value=iter([entry_point]))
+-
+-        with mock.patch("pkg_resources.iter_entry_points", iter_entry_points):
+-            with self.assertRaises(errors.EntryPointError) as ctx:
+-                opener.open_fs("test://")
+-            self.assertEqual("entry point did not return an opener", str(ctx.exception))
+-
+-    def test_entry_point_create_error(self):
+-        class BadOpener(opener.Opener):
+-            def __init__(self, *args, **kwargs):
+-                raise ValueError("some creation error")
+-
+-            def open_fs(self, *args, **kwargs):
+-                pass
+-
+-        entry_point = mock.MagicMock()
+-        entry_point.load = mock.MagicMock(return_value=BadOpener)
+-        iter_entry_points = mock.MagicMock(return_value=iter([entry_point]))
+-
+-        with mock.patch("pkg_resources.iter_entry_points", iter_entry_points):
+-            with self.assertRaises(errors.EntryPointError) as ctx:
+-                opener.open_fs("test://")
+-            self.assertEqual(
+-                "could not instantiate opener; some creation error", str(ctx.exception)
+-            )
+-
+     def test_install(self):
+         """Test Registry.install works as a decorator."""
+         registry = Registry()
+@@ -215,12 +155,6 @@
+     def tearDown(self):
+         shutil.rmtree(self.tmpdir)
+ 
+-    def test_repr(self):
+-        # Check __repr__ works
+-        for entry_point in pkg_resources.iter_entry_points("fs.opener"):
+-            _opener = entry_point.load()
+-            repr(_opener())
+-
+     def test_open_osfs(self):
+         fs = opener.open_fs("osfs://.")
+         self.assertIsInstance(fs, OSFS)
+--- a/fs/__init__.py
++++ b/fs/__init__.py
+@@ -1,8 +1,6 @@
+ """Python filesystem abstraction layer.
+ """
+ 
+-__import__("pkg_resources").declare_namespace(__name__)  # type: ignore
+-
+ from . import path
+ from ._fscompat import fsdecode, fsencode
+ from ._version import __version__
