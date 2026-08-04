@@ -1,0 +1,769 @@
+Subject: remove runtime dependency on python3-six
+From: Alexandre Detiste <tchet@debian.org>
+Forwarded: no, project seams inactive
+
+--- a/setup.cfg
++++ b/setup.cfg
+@@ -44,7 +44,6 @@
+ install_requires =
+     appdirs~=1.4.3
+     setuptools
+-    six ~=1.10
+     enum34 ~=1.1.6      ;  python_version < '3.4'
+     typing ~=3.6        ;  python_version < '3.6'
+     backports.os ~=0.1  ;  python_version < '3.0'
+--- a/fs/_bulk.py
++++ b/fs/_bulk.py
+@@ -9,7 +9,7 @@
+ import typing
+ 
+ import threading
+-from six.moves.queue import Queue
++from queue import Queue
+ 
+ from .copy import copy_file_internal, copy_modified_time
+ from .errors import BulkCopyFailed
+--- a/fs/_fscompat.py
++++ b/fs/_fscompat.py
+@@ -1,4 +1,3 @@
+-import six
+ 
+ try:
+     from os import fsdecode, fsencode
+@@ -17,7 +16,7 @@
+         path representation is not str or bytes, TypeError is raised. If the
+         provided path is not str, bytes, or os.PathLike, TypeError is raised.
+         """
+-        if isinstance(path, (six.text_type, bytes)):
++        if isinstance(path, (str, bytes)):
+             return path
+ 
+         # Work from the object's type to match method resolution of other magic
+@@ -33,7 +32,7 @@
+                     "expected string type or os.PathLike object, "
+                     "not " + path_type.__name__
+                 )
+-        if isinstance(path_repr, (six.text_type, bytes)):
++        if isinstance(path_repr, (str, bytes)):
+             return path_repr
+         else:
+             raise TypeError(
+--- a/fs/_typing.py
++++ b/fs/_typing.py
+@@ -4,19 +4,4 @@
+ """
+ import sys
+ 
+-import six
+-
+-_PY = sys.version_info
+-
+-from typing import overload  # type: ignore
+-
+-if _PY.major == 3 and _PY.minor == 5 and _PY.micro in (0, 1):
+-
+-    def overload(func):  # pragma: no cover  # noqa: F811
+-        return func
+-
+-
+-try:
+-    from typing import Text
+-except ImportError:  # pragma: no cover
+-    Text = six.text_type  # type: ignore
++from typing import overload, Text
+--- a/fs/_url_tools.py
++++ b/fs/_url_tools.py
+@@ -2,7 +2,7 @@
+ 
+ import platform
+ import re
+-import six
++import urllib.request
+ 
+ if typing.TYPE_CHECKING:
+     from typing import Text
+@@ -24,14 +24,10 @@
+     """
+     if _WINDOWS_PLATFORM and _has_drive_letter(path_snippet):
+         drive_letter, path = path_snippet.split(":", 1)
+-        if six.PY2:
+-            path = path.encode("utf-8")
+-        path = six.moves.urllib.request.pathname2url(path)
++        path = urllib.request.pathname2url(path)
+         path_snippet = "{}:{}".format(drive_letter, path)
+     else:
+-        if six.PY2:
+-            path_snippet = path_snippet.encode("utf-8")
+-        path_snippet = six.moves.urllib.request.pathname2url(path_snippet)
++        path_snippet = urllib.request.pathname2url(path_snippet)
+     return path_snippet
+ 
+ 
+--- a/fs/appfs.py
++++ b/fs/appfs.py
+@@ -12,7 +12,6 @@
+ import typing
+ 
+ import abc
+-import six
+ from appdirs import AppDirs
+ 
+ from ._repr import make_repr
+@@ -47,8 +46,7 @@
+         return super(abc.ABCMeta, mcls).__new__(mcls, classname, bases, cls_dict)
+ 
+ 
+-@six.add_metaclass(_CopyInitMeta)
+-class _AppFS(OSFS):
++class _AppFS(OSFS,metaclass=_CopyInitMeta):
+     """Abstract base class for an app FS."""
+ 
+     # FIXME(@althonos): replace by ClassVar[Text] once
+--- a/fs/base.py
++++ b/fs/base.py
+@@ -14,7 +14,6 @@
+ import hashlib
+ import itertools
+ import os
+-import six
+ import threading
+ import time
+ import warnings
+@@ -93,8 +92,7 @@
+     return _method
+ 
+ 
+-@six.add_metaclass(abc.ABCMeta)
+-class FS(object):
++class FS(metaclass=abc.ABCMeta):
+     """Base class for FS objects."""
+ 
+     # This is the "standard" meta namespace.
+@@ -364,7 +362,7 @@
+                 ``path`` does not exist.
+ 
+         """
+-        if not isinstance(text, six.text_type):
++        if not isinstance(text, str):
+             raise TypeError("must be unicode string")
+         with self._lock:
+             with self.open(
+@@ -1512,7 +1510,7 @@
+             TypeError: if ``contents`` is not a unicode string.
+ 
+         """
+-        if not isinstance(contents, six.text_type):
++        if not isinstance(contents, str):
+             raise TypeError("contents must be unicode")
+         with closing(
+             self.open(
+@@ -1569,13 +1567,11 @@
+         if isinstance(path, bytes):
+             raise TypeError(
+                 "paths must be unicode (not str)"
+-                if six.PY2
+-                else "paths must be str (not bytes)"
+             )
+ 
+         meta = self.getmeta()
+ 
+-        invalid_chars = typing.cast(six.text_type, meta.get("invalid_path_chars"))
++        invalid_chars = typing.cast(str, meta.get("invalid_path_chars"))
+         if invalid_chars:
+             if set(path).intersection(invalid_chars):
+                 raise errors.InvalidCharsInPath(path)
+@@ -1688,7 +1684,7 @@
+         """
+         if patterns is None:
+             return True
+-        if isinstance(patterns, six.text_type):
++        if isinstance(patterns, str):
+             raise TypeError("patterns must be a list or sequence")
+         case_sensitive = not typing.cast(
+             bool, self.getmeta().get("case_insensitive", False)
+--- a/fs/compress.py
++++ b/fs/compress.py
+@@ -8,7 +8,6 @@
+ 
+ import typing
+ 
+-import six
+ import tarfile
+ import time
+ import zipfile
+@@ -61,9 +60,6 @@
+             # Zip names must be relative, directory names must end
+             # with a slash.
+             zip_name = relpath(path + "/" if info.is_dir else path)
+-            if not six.PY3:
+-                # Python2 expects bytes filenames
+-                zip_name = zip_name.encode(encoding, "replace")
+ 
+             if info.has_namespace("stat"):
+                 # If the file has a stat namespace, get the
+@@ -141,7 +137,7 @@
+     tar_attr = [("uid", "uid"), ("gid", "gid"), ("uname", "user"), ("gname", "group")]
+ 
+     mode = "w:{}".format(compression or "")
+-    if isinstance(file, (six.text_type, six.binary_type)):
++    if isinstance(file, (str, bytes)):
+         _tar = tarfile.open(file, mode=mode)
+     else:
+         _tar = tarfile.open(fileobj=file, mode=mode)
+@@ -153,9 +149,6 @@
+         for path, info in gen_walk:
+             # Tar names must be relative
+             tar_name = relpath(path)
+-            if not six.PY3:
+-                # Python2 expects bytes filenames
+-                tar_name = tar_name.encode(encoding, "replace")
+ 
+             tar_info = tarfile.TarInfo(tar_name)
+ 
+--- a/fs/errors.py
++++ b/fs/errors.py
+@@ -13,8 +13,6 @@
+ import typing
+ 
+ import functools
+-import six
+-from six import text_type
+ 
+ if typing.TYPE_CHECKING:
+     from typing import Optional, Text
+@@ -67,7 +65,6 @@
+         return type(self), (self.namespace,)
+ 
+ 
+-@six.python_2_unicode_compatible
+ class FSError(Exception):
+     """Base exception for the `fs` module."""
+ 
+@@ -114,7 +111,7 @@
+     def __init__(self, msg=None, exc=None):  # noqa: D107
+         # type: (Optional[Text], Optional[Exception]) -> None
+         self._msg = msg or self.default_message
+-        self.details = "" if exc is None else text_type(exc)
++        self.details = "" if exc is None else str(exc)
+         self.exc = exc
+ 
+     @classmethod
+@@ -195,7 +192,7 @@
+         # type: (...) -> None
+         self.path = path
+         self.exc = exc
+-        self.details = "" if exc is None else text_type(exc)
++        self.details = "" if exc is None else str(exc)
+         self.errno = getattr(exc, "errno", None)
+         super(OperationFailed, self).__init__(msg=msg)
+ 
+--- a/fs/ftpfs.py
++++ b/fs/ftpfs.py
+@@ -23,7 +23,6 @@
+ from typing import cast
+ 
+ from ftplib import error_perm, error_temp
+-from six import PY2, raise_from, text_type
+ 
+ from . import _ftp_parse as ftp_parse
+ from . import errors
+@@ -112,21 +111,11 @@
+ def _parse_ftp_error(error):
+     # type: (ftplib.Error) -> Tuple[Text, Text]
+     """Extract code and message from ftp error."""
+-    code, _, message = text_type(error).partition(" ")
++    code, _, message = str(error).partition(" ")
+     return code, message
+ 
+ 
+-if PY2:
+-
+-    def _encode(st, encoding):
+-        # type: (Union[Text, bytes], Text) -> str
+-        return st.encode(encoding) if isinstance(st, text_type) else st
+-
+-    def _decode(st, encoding):
+-        # type: (Union[Text, bytes], Text) -> Text
+-        return st.decode(encoding, "replace") if isinstance(st, bytes) else st
+-
+-else:
++if True:
+ 
+     def _encode(st, _):
+         # type: (str, str) -> str
+@@ -428,7 +417,7 @@
+         self.tls = tls
+ 
+         if self.tls and isinstance(FTP_TLS, Exception):
+-            raise_from(errors.CreateFailed("FTP over TLS not supported"), FTP_TLS)
++            raise errors.CreateFailed("FTP over TLS not supported") from FTP_TLS
+ 
+         self.encoding = "latin-1"
+         self._ftp = None  # type: Optional[FTP]
+@@ -488,7 +477,7 @@
+             else:
+                 self._features = self._parse_features(feat_response)
+                 self.encoding = "utf-8" if "UTF8" in self._features else "latin-1"
+-                if not PY2:
++                if True:
+                     _ftp.file = _ftp.sock.makefile(  # type: ignore
+                         "r", encoding=self.encoding
+                     )
+--- a/fs/info.py
++++ b/fs/info.py
+@@ -6,7 +6,6 @@
+ import typing
+ from typing import cast
+ 
+-import six
+ from copy import deepcopy
+ 
+ from ._typing import Text, overload
+@@ -26,7 +25,6 @@
+     T = typing.TypeVar("T")
+ 
+ 
+-@six.python_2_unicode_compatible
+ class Info(object):
+     """Container for :ref:`info`.
+ 
+--- a/fs/memoryfs.py
++++ b/fs/memoryfs.py
+@@ -7,7 +7,6 @@
+ import contextlib
+ import io
+ import os
+-import six
+ import time
+ from collections import OrderedDict
+ from threading import RLock
+@@ -48,7 +47,6 @@
+     _M = typing.TypeVar("_M", bound="MemoryFS")
+ 
+ 
+-@six.python_2_unicode_compatible
+ class _MemoryFile(io.RawIOBase):
+     def __init__(self, path, memory_fs, mode, dir_entry):
+         # type: (Text, MemoryFS, Text, _DirEntry) -> None
+@@ -315,7 +313,6 @@
+         return Info(info)
+ 
+ 
+-@six.python_2_unicode_compatible
+ class MemoryFS(FS):
+     """A filesystem that stored in memory.
+ 
+--- a/fs/mode.py
++++ b/fs/mode.py
+@@ -9,7 +9,6 @@
+ 
+ import typing
+ 
+-import six
+ 
+ from ._typing import Text
+ 
+@@ -21,7 +20,6 @@
+ 
+ 
+ # https://docs.python.org/3/library/functions.html#open
+-@six.python_2_unicode_compatible
+ class Mode(typing.Container[Text]):
+     """An abstraction for I/O modes.
+ 
+@@ -78,7 +76,7 @@
+         support exclusive mode.
+ 
+         """
+-        return self._mode.replace("x", "w") if six.PY2 else self._mode
++        return self._mode
+ 
+     def to_platform_bin(self):
+         # type: () -> Text
+--- a/fs/mountfs.py
++++ b/fs/mountfs.py
+@@ -5,7 +5,6 @@
+ 
+ import typing
+ 
+-from six import text_type
+ 
+ from . import errors
+ from .base import FS
+@@ -104,7 +103,7 @@
+             fs (FS or str): A filesystem (instance or URL) to mount.
+ 
+         """
+-        if isinstance(fs, text_type):
++        if isinstance(fs, str):
+             from .opener import open_fs
+ 
+             fs = open_fs(fs)
+--- a/fs/multifs.py
++++ b/fs/multifs.py
+@@ -7,7 +7,6 @@
+ 
+ from collections import OrderedDict, namedtuple
+ from operator import itemgetter
+-from six import text_type
+ 
+ from . import errors
+ from .base import FS
+@@ -99,7 +98,7 @@
+                 filesystem will be looked at first.
+ 
+         """
+-        if isinstance(fs, text_type):
++        if isinstance(fs, str):
+             fs = open_fs(fs)
+ 
+         if not isinstance(fs, FS):
+--- a/fs/opener/base.py
++++ b/fs/opener/base.py
+@@ -5,7 +5,6 @@
+ import typing
+ 
+ import abc
+-import six
+ 
+ if typing.TYPE_CHECKING:
+     from typing import List, Text
+@@ -14,8 +13,7 @@
+     from .parse import ParseResult
+ 
+ 
+-@six.add_metaclass(abc.ABCMeta)
+-class Opener(object):
++class Opener(metaclass=abc.ABCMeta):
+     """The base class for filesystem openers.
+ 
+     An opener is responsible for opening a filesystem for a given
+--- a/fs/opener/parse.py
++++ b/fs/opener/parse.py
+@@ -7,8 +7,7 @@
+ 
+ import collections
+ import re
+-import six
+-from six.moves.urllib.parse import parse_qs, unquote
++from urllib.parse import parse_qs, unquote
+ 
+ from .errors import ParseError
+ 
+@@ -89,7 +88,7 @@
+     resource = unquote(url)
+     if has_qs:
+         _params = parse_qs(qs, keep_blank_values=True)
+-        params = {k: unquote(v[0]) for k, v in six.iteritems(_params)}
++        params = {k: unquote(v[0]) for k, v in _params.items()}
+     else:
+         params = {}
+     return ParseResult(fs_name, username, password, resource, params, path)
+--- a/fs/osfs.py
++++ b/fs/osfs.py
+@@ -16,7 +16,6 @@
+ import os
+ import platform
+ import shutil
+-import six
+ import stat
+ import tempfile
+ 
+@@ -77,7 +76,6 @@
+ _WINDOWS_PLATFORM = platform.system() == "Windows"
+ 
+ 
+-@six.python_2_unicode_compatible
+ class OSFS(FS):
+     """Create an OSFS.
+ 
+@@ -161,7 +159,7 @@
+ 
+         if _WINDOWS_PLATFORM:  # pragma: no cover
+             _meta["invalid_path_chars"] = (
+-                "".join(six.unichr(n) for n in range(31)) + '\\:*?"<>|'
++                "".join(chr(n) for n in range(31)) + '\\:*?"<>|'
+             )
+         else:
+             _meta["invalid_path_chars"] = "\0"
+@@ -351,8 +349,6 @@
+             raise errors.FileExpected(path)
+         sys_path = self._to_sys_path(_path)
+         with convert_os_errors("openbin", path):
+-            if six.PY2 and _mode.exclusive:
+-                sys_path = os.open(sys_path, os.O_RDWR | os.O_CREAT | os.O_EXCL)
+             binary_file = io.open(
+                 sys_path, mode=_mode.to_platform_bin(), buffering=buffering, **options
+             )
+@@ -641,8 +637,6 @@
+             raise FileExpected(path)
+         sys_path = self._to_sys_path(_path)
+         with convert_os_errors("open", path):
+-            if six.PY2 and _mode.exclusive:
+-                sys_path = os.open(sys_path, os.O_RDWR | os.O_CREAT | os.O_EXCL)
+             _encoding = encoding or "utf-8"
+             return io.open(
+                 sys_path,
+--- a/fs/permissions.py
++++ b/fs/permissions.py
+@@ -6,7 +6,6 @@
+ import typing
+ from typing import Iterable
+ 
+-import six
+ 
+ from ._typing import Text
+ 
+@@ -40,7 +39,6 @@
+             obj.remove(self._name)
+ 
+ 
+-@six.python_2_unicode_compatible
+ class Permissions(object):
+     """An abstraction for file system permissions.
+ 
+--- a/fs/subfs.py
++++ b/fs/subfs.py
+@@ -5,7 +5,6 @@
+ 
+ import typing
+ 
+-import six
+ 
+ from .path import abspath, join, normpath, relpath
+ from .wrapfs import WrapFS
+@@ -19,7 +18,6 @@
+ _F = typing.TypeVar("_F", bound="FS", covariant=True)
+ 
+ 
+-@six.python_2_unicode_compatible
+ class SubFS(WrapFS[_F], typing.Generic[_F]):
+     """A sub-directory on a parent filesystem.
+ 
+--- a/fs/tarfs.py
++++ b/fs/tarfs.py
+@@ -7,7 +7,6 @@
+ from typing import IO, cast
+ 
+ import os
+-import six
+ import tarfile
+ from collections import OrderedDict
+ 
+@@ -48,14 +47,8 @@
+ __all__ = ["TarFS", "WriteTarFS", "ReadTarFS"]
+ 
+ 
+-if six.PY2:
+-
+-    def _get_member_info(member, encoding):
+-        # type: (TarInfo, Text) -> Dict[Text, object]
+-        return member.get_info(encoding, None)
+-
+-else:
+ 
++if True:
+     def _get_member_info(member, encoding):
+         # type: (TarInfo, Text) -> Dict[Text, object]
+         # NOTE(@althonos): TarInfo.get_info is neither in the doc nor
+@@ -122,7 +115,7 @@
+         temp_fs="temp://__tartemp__",  # type: Union[Text, FS]
+     ):
+         # type: (...) -> FS
+-        if isinstance(file, (six.text_type, six.binary_type)):
++        if isinstance(file, (str, bytes)):
+             file = os.path.expanduser(file)
+             filename = file  # type: Text
+         else:
+@@ -130,7 +123,7 @@
+ 
+         if write and compression is None:
+             compression = None
+-            for comp, extensions in six.iteritems(cls._compression_formats):
++            for comp, extensions in cls._compression_formats.items():
+                 if filename.endswith(extensions):
+                     compression = comp
+                     break
+@@ -156,7 +149,6 @@
+             pass
+ 
+ 
+-@six.python_2_unicode_compatible
+ class WriteTarFS(WrapFS):
+     """A writable tar file."""
+ 
+@@ -233,7 +225,6 @@
+             )
+ 
+ 
+-@six.python_2_unicode_compatible
+ class ReadTarFS(FS):
+     """A readable tar file."""
+ 
+@@ -265,7 +256,7 @@
+         super(ReadTarFS, self).__init__()
+         self._file = file
+         self.encoding = encoding
+-        if isinstance(file, (six.text_type, six.binary_type)):
++        if isinstance(file, (str, bytes)):
+             self._tar = tarfile.open(file, mode="r")
+         else:
+             self._tar = tarfile.open(fileobj=file, mode="r")
+@@ -303,17 +294,7 @@
+         # type: () -> Text
+         return "<TarFS '{}'>".format(self._file)
+ 
+-    if six.PY2:
+-
+-        def _encode(self, s):
+-            # type: (Text) -> str
+-            return s.encode(self.encoding)
+-
+-        def _decode(self, s):
+-            # type: (str) -> Text
+-            return s.decode(self.encoding)
+-
+-    else:
++    if True:
+ 
+         def _encode(self, s):
+             # type: (Text) -> str
+@@ -429,20 +410,13 @@
+         try:
+             member = self._directory_entries[_path]
+         except KeyError:
+-            six.raise_from(errors.ResourceNotFound(path), None)
++            raise errors.ResourceNotFound(path)
+ 
+         if not member.isfile():
+             raise errors.FileExpected(path)
+ 
+         rw = RawWrapper(cast(IO, self._tar.extractfile(member)))
+ 
+-        if six.PY2:  # Patch nonexistent file.flush in Python2
+-
+-            def _flush():
+-                pass
+-
+-            rw.flush = _flush
+-
+         return rw  # type: ignore
+ 
+     def remove(self, path):
+@@ -467,7 +441,7 @@
+ 
+     def geturl(self, path, purpose="download"):
+         # type: (Text, Text) -> Text
+-        if purpose == "fs" and isinstance(self._file, six.string_types):
++        if purpose == "fs" and isinstance(self._file, str):
+             quoted_file = url_quote(self._file)
+             quoted_path = url_quote(path)
+             return "tar://{}!/{}".format(quoted_file, quoted_path)
+--- a/fs/tempfs.py
++++ b/fs/tempfs.py
+@@ -14,7 +14,6 @@
+ import typing
+ 
+ import shutil
+-import six
+ import tempfile
+ 
+ from . import errors
+@@ -24,7 +23,6 @@
+     from typing import Optional, Text
+ 
+ 
+-@six.python_2_unicode_compatible
+ class TempFS(OSFS):
+     """A temporary filesystem on the OS.
+ 
+--- a/fs/wrapfs.py
++++ b/fs/wrapfs.py
+@@ -5,7 +5,6 @@
+ 
+ import typing
+ 
+-import six
+ 
+ from . import errors
+ from .base import FS
+@@ -49,7 +48,6 @@
+ _W = typing.TypeVar("_W", bound="WrapFS[FS]")
+ 
+ 
+-@six.python_2_unicode_compatible
+ class WrapFS(FS, typing.Generic[_F]):
+     """A proxy for a filesystem object.
+ 
+--- a/fs/zipfs.py
++++ b/fs/zipfs.py
+@@ -6,7 +6,6 @@
+ import sys
+ import typing
+ 
+-import six
+ import zipfile
+ from datetime import datetime
+ 
+@@ -253,7 +252,6 @@
+             pass
+ 
+ 
+-@six.python_2_unicode_compatible
+ class WriteZipFS(WrapFS):
+     """A writable zip file."""
+ 
+@@ -330,7 +328,6 @@
+             )
+ 
+ 
+-@six.python_2_unicode_compatible
+ class ReadZipFS(FS):
+     """A readable zip file."""
+ 
+@@ -367,8 +364,6 @@
+         path = relpath(normpath(path))
+         if self._directory.isdir(path):
+             path = forcedir(path)
+-        if six.PY2:
+-            return path.encode(self.encoding)
+         return path
+ 
+     @property
+@@ -381,8 +376,6 @@
+                 self._directory_fs = _fs = MemoryFS()
+                 for zip_name in self._zip.namelist():
+                     resource_name = zip_name
+-                    if six.PY2:
+-                        resource_name = resource_name.decode(self.encoding, "replace")
+                     if resource_name.endswith("/"):
+                         _fs.makedirs(resource_name, recreate=True)
+                     else:
+@@ -503,7 +496,7 @@
+ 
+     def geturl(self, path, purpose="download"):
+         # type: (Text, Text) -> Text
+-        if purpose == "fs" and isinstance(self._file, six.string_types):
++        if purpose == "fs" and isinstance(self._file, str):
+             quoted_file = url_quote(self._file)
+             quoted_path = url_quote(path)
+             return "zip://{}!/{}".format(quoted_file, quoted_path)
+--- a/fs/error_tools.py
++++ b/fs/error_tools.py
+@@ -9,7 +9,6 @@
+ import errno
+ import platform
+ from contextlib import contextmanager
+-from six import reraise
+ 
+ from . import errors
+ 
+@@ -86,7 +85,7 @@
+             if _errno == errno.EACCES and sys.platform == "win32":
+                 if getattr(exc_value, "args", None) == 32:  # pragma: no cover
+                     fserror = errors.ResourceLocked
+-            reraise(fserror, fserror(self._path, exc=exc_value), traceback)
++            raise fserror(self._path, exc=exc_value).with_traceback(traceback)
+ 
+ 
+ # Stops linter complaining about invalid class name

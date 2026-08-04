@@ -1,0 +1,84 @@
+Index: python-fs-2.4.16/fs/appfs.py
+===================================================================
+--- python-fs-2.4.16.orig/fs/appfs.py
++++ python-fs-2.4.16/fs/appfs.py
+@@ -12,7 +12,7 @@ subclasses of `~fs.osfs.OSFS`.
+ import typing
+ 
+ import abc
+-from appdirs import AppDirs
++from platformdirs import PlatformDirs
+ 
+ from ._repr import make_repr
+ from .osfs import OSFS
+@@ -76,7 +76,7 @@ class _AppFS(OSFS,metaclass=_CopyInitMet
+                 will be created if it does not exist.
+ 
+         """
+-        self.app_dirs = AppDirs(appname, author, version, roaming)
++        self.app_dirs = PlatformDirs(appname, author, version, roaming)
+         self._create = create
+         super(_AppFS, self).__init__(
+             getattr(self.app_dirs, self.app_dir), create=create
+Index: python-fs-2.4.16/tests/test_appfs.py
+===================================================================
+--- python-fs-2.4.16.orig/tests/test_appfs.py
++++ python-fs-2.4.16/tests/test_appfs.py
+@@ -29,10 +29,9 @@ class _TestAppFS(fs.test.FSTestCases):
+ 
+     def make_fs(self):
+         with mock.patch(
+-            "appdirs.{}".format(self.AppFS.app_dir),
+-            autospec=True,
+-            spec_set=True,
+-            return_value=tempfile.mkdtemp(dir=self.tmpdir),
++            f"platformdirs.PlatformDirs.{self.AppFS.app_dir}",
++            new_callable=mock.PropertyMock,
++            return_value=tempfile.mkdtemp(),
+         ):
+             return self.AppFS("fstest", "willmcgugan", "1.0")
+ 
+Index: python-fs-2.4.16/tests/test_opener.py
+===================================================================
+--- python-fs-2.4.16.orig/tests/test_opener.py
++++ python-fs-2.4.16/tests/test_opener.py
+@@ -265,7 +265,7 @@ class TestOpeners(unittest.TestCase):
+         mem_fs_2 = opener.open_fs(mem_fs)
+         self.assertEqual(mem_fs, mem_fs_2)
+ 
+-    @mock.patch("appdirs.{}".format(UserDataFS.app_dir), autospec=True, spec_set=True)
++    @mock.patch("platformdirs.{}".format(UserDataFS.app_dir), autospec=True, spec_set=True)
+     def test_open_userdata(self, app_dir):
+         app_dir.return_value = self.tmpdir
+ 
+@@ -277,7 +277,7 @@ class TestOpeners(unittest.TestCase):
+         self.assertEqual(app_fs.app_dirs.appauthor, "willmcgugan")
+         self.assertEqual(app_fs.app_dirs.version, "1.0")
+ 
+-    @mock.patch("appdirs.{}".format(UserDataFS.app_dir), autospec=True, spec_set=True)
++    @mock.patch("platformdirs.{}".format(UserDataFS.app_dir), autospec=True, spec_set=True)
+     def test_open_userdata_no_version(self, app_dir):
+         app_dir.return_value = self.tmpdir
+ 
+@@ -286,7 +286,7 @@ class TestOpeners(unittest.TestCase):
+         self.assertEqual(app_fs.app_dirs.appauthor, "willmcgugan")
+         self.assertEqual(app_fs.app_dirs.version, None)
+ 
+-    @mock.patch("appdirs.{}".format(UserDataFS.app_dir), autospec=True, spec_set=True)
++    @mock.patch("platformdirs.{}".format(UserDataFS.app_dir), autospec=True, spec_set=True)
+     def test_user_data_opener(self, app_dir):
+         app_dir.return_value = self.tmpdir
+ 
+Index: python-fs-2.4.16/setup.cfg
+===================================================================
+--- python-fs-2.4.16.orig/setup.cfg
++++ python-fs-2.4.16/setup.cfg
+@@ -42,7 +42,7 @@ packages = find:
+ setup_requires =
+     setuptools >=38.3.0
+ install_requires =
+-    appdirs~=1.4.3
++    platformdirs~=4.3.6
+     setuptools
+     enum34 ~=1.1.6      ;  python_version < '3.4'
+     typing ~=3.6        ;  python_version < '3.6'
